@@ -10,24 +10,18 @@ export type RunCliDeps = {
   fetchImpl?: typeof fetch;
 };
 
-// `args` is the full remaining argv after `wjscli` (i.e. argv.slice(2) in
-// index.ts). The first positional is `<base-url>`, then a command path
-// (e.g. `page get` or `pages tree`), then flags + positionals for that
-// command.
+// `args` are the tokens after `<base-url>` — i.e. the command path
+// (e.g. `page get` or `pages tree`) followed by its flags and positionals.
+// Top-level argv parsing (URL canonicalization, validate/mcp subcommand
+// dispatch) is done in src/index.ts; runCli only sees CLI-mode invocations.
 export async function runCli(
+  rawBaseUrl: string,
   args: ReadonlyArray<string>,
   deps: RunCliDeps = {},
 ): Promise<number> {
-  if (args.length === 0) {
-    printCliUsage();
-    return 2;
-  }
-
-  const [rawBaseUrl, ...rest] = args;
-
   let baseUrl: string;
   try {
-    baseUrl = canonicalizeBaseUrl(rawBaseUrl ?? '');
+    baseUrl = canonicalizeBaseUrl(rawBaseUrl);
   } catch (err) {
     process.stderr.write(
       `wjscli: ${err instanceof Error ? err.message : String(err)}\n`,
@@ -35,10 +29,15 @@ export async function runCli(
     return 2;
   }
 
-  const matched = matchCommand(rest);
+  if (args.length === 0) {
+    printCliUsage();
+    return 2;
+  }
+
+  const matched = matchCommand(args);
   if (matched === null) {
     process.stderr.write(
-      `wjscli: unknown command: ${rest.join(' ') || '(none)'}\n`,
+      `wjscli: unknown command: ${args.join(' ') || '(none)'}\n`,
     );
     printCliUsage();
     return 2;
@@ -69,7 +68,7 @@ export async function runCli(
     if (err instanceof MissingConfigError) {
       process.stderr.write(
         `wjscli: ${err.message}\n` +
-          `  No config found. Run: wjscli validate ${baseUrl} <jwt>\n`,
+          `  No config found. Run: wjscli ${baseUrl} validate <jwt>\n`,
       );
       return 1;
     }
@@ -132,7 +131,7 @@ export async function runCli(
 
 function printCliUsage(): void {
   const lines = [
-    'usage: wjscli <base-url> <command> [...]',
+    'usage: wjscli <base-url> <command> [args...]',
     '',
     'Commands:',
   ];

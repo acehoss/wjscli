@@ -9,7 +9,7 @@ A single binary, `wjscli`, that talks to a Wiki.js v2 instance **as a real human
 
 It serves two surfaces over the same set of seven tools:
 
-- **MCP stdio server** (`wjscli mcp <url>`).
+- **MCP stdio server** (`wjscli <url> mcp`).
 - **Command-line tools** (`wjscli <url> page get …`, etc.).
 
 ## Background — why this works
@@ -25,19 +25,21 @@ It serves two surfaces over the same set of seven tools:
 
 ## CLI surface
 
-Single binary `wjscli`. Top-level argv dispatch in `src/index.ts`:
+Single binary `wjscli`. Every invocation has `<base-url>` as the **first** positional, then a subcommand:
 
 ```text
-wjscli validate [-t] <base-url> <jwt>
-wjscli mcp <base-url>
+wjscli <base-url> validate <jwt> [-t]
+wjscli <base-url> mcp
 wjscli <base-url> <command-group> [<verb>] [flags...]
 wjscli --help | --version
 ```
 
+Top-level argv dispatch in `src/index.ts`. As an ergonomic touch, if the user passes `validate` or `mcp` before the URL, the dispatcher prints a friendly "base URL must come first" hint instead of letting the URL parse fail.
+
 ### `validate` subcommand
 
 ```text
-wjscli validate [-t] <base-url> <jwt>
+wjscli <base-url> validate <jwt> [-t]
 ```
 
 - Validates the JWT by making `query { users { profile { id email name } } }` against `<base-url>/graphql`. This is the only user-query field on Wiki.js v2 without an `@auth` schema directive whose resolver still rejects guests, so any authenticated user can call it regardless of permissions. Source: `repos/wiki/server/graph/resolvers/user.js`.
@@ -56,12 +58,12 @@ With `-t` / `--token-refresh`, after the initial probe + config write, the proce
 - On transient network / HTTP / GraphQL errors: logs to stderr, keeps the loop running.
 - SIGINT/SIGTERM trigger a clean shutdown: stop the timer, `await tokenStore.close()`, exit `0`.
 
-The `-t` flag may appear anywhere in argv (`-t URL JWT`, `URL JWT -t`, `URL -t JWT`).
+The `-t` flag may appear anywhere among the post-URL args (`URL validate JWT -t`, `URL validate -t JWT`).
 
 ### `mcp` subcommand (stdio MCP server)
 
 ```text
-wjscli mcp <base-url>
+wjscli <base-url> mcp
 ```
 
 - Reads JWT from the config file derived from `<base-url>`.
@@ -192,7 +194,7 @@ Out of scope for v1: assets/uploads, page move/delete, admin/user mgmt, page con
   - `test/wiki/client.test.ts` — HTTP/network/GraphQL classification, JWT redaction in error text, retry policy (exactly once on `NetworkError`, never on `HttpError`/`AuthExpiredError`/`GraphQLError`), `new-jwt` capture including the corner case of a refresh arriving with a non-2xx response.
   - `test/wiki/queries.test.ts` — pins the `pages.create` and `pages.update` `page { ... }` sub-selections to NOT include `locale` or `editor` (Wiki.js's mutation resolvers can't resolve those — see MF1 in repo history).
   - `test/validate.test.ts` — full subcommand coverage including the real Wiki.js auth-rejection shape (HTTP 200 + AuthRequired GraphQL error) and the `-t` daemon-wiring path (tested via the `runDaemon` test seam, so the test does NOT spin up real intervals).
-  - `test/server.test.ts` — `wjscli mcp` argv/config paths and `installShutdownHandlers` routing (SIGINT/SIGTERM/beforeExit/double-signal force-exit).
+  - `test/server.test.ts` — `wjscli <url> mcp` argv/config paths and `installShutdownHandlers` routing (SIGINT/SIGTERM/beforeExit/double-signal force-exit).
   - `test/index.test.ts` — top-level argv dispatch (`mcp` / `validate` / bare-URL → CLI).
   - `test/cli/argv.test.ts` — argv reader + helper unit tests (`readArgv`, `takeOptionalString`, `takeOptionalInt`, `takeStringArray`, `takeBoolean`, `rejectUnknownFlags`).
   - `test/cli/run.test.ts` — `runCli` end-to-end against the mock: usage errors, missing-config, happy-path renderings (human + `--json`), tool-execution errors.
@@ -213,7 +215,7 @@ repos/wjscli/
 ├── SPEC.md             # this file — design source of truth
 ├── src/
 │   ├── index.ts        # main bin entry; argv dispatch (validate / mcp / CLI)
-│   ├── server.ts       # MCP stdio server wiring + shutdown handlers (`wjscli mcp`)
+│   ├── server.ts       # MCP stdio server wiring + shutdown handlers (`wjscli <url> mcp`)
 │   ├── validate.ts     # `validate` subcommand (one-shot probe + optional -t daemon)
 │   ├── config.ts       # config-file read/write, atomic-rename, URL canonicalization
 │   ├── cli/

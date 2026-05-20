@@ -46,26 +46,23 @@ afterEach(async () => {
 const stderrText = (): string => stderrChunks.join('');
 
 describe('runServer — usage and config errors', () => {
-  it('returns 2 with no args', async () => {
-    expect(await runServer([])).toBe(2);
-  });
-
-  it('returns 2 with too many args', async () => {
-    expect(await runServer([baseUrl, 'extra'])).toBe(2);
+  it('returns 2 with extra args after the URL', async () => {
+    expect(await runServer(baseUrl, ['extra'])).toBe(2);
   });
 
   it('returns 2 on an invalid URL', async () => {
-    expect(await runServer(['not a url'])).toBe(2);
+    expect(await runServer('not a url')).toBe(2);
   });
 
   it('returns 1 when no config file exists for the base URL', async () => {
-    const code = await runServer([baseUrl], { smokeOnly: true });
+    const code = await runServer(baseUrl, [], { smokeOnly: true });
     expect(code).toBe(1);
   });
 
-  it('missing-config stderr names "wjscli validate" so the user knows what to do', async () => {
-    await runServer([baseUrl], { smokeOnly: true });
-    expect(stderrText()).toContain('wjscli validate');
+  it('missing-config stderr names "wjscli ... validate" so the user knows what to do', async () => {
+    await runServer(baseUrl, [], { smokeOnly: true });
+    expect(stderrText()).toContain('wjscli');
+    expect(stderrText()).toContain('validate');
     expect(stderrText()).toContain(baseUrl);
   });
 
@@ -75,7 +72,7 @@ describe('runServer — usage and config errors', () => {
       jwt: 'a.b.c',
       refreshedAt: '2026-05-18T12:00:00.000Z',
     });
-    const code = await runServer([baseUrl], { smokeOnly: true });
+    const code = await runServer(baseUrl, [], { smokeOnly: true });
     expect(code).toBe(0);
   });
 });

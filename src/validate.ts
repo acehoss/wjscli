@@ -35,21 +35,21 @@ export type RunValidateDeps = {
 
 export type ParsedValidateArgs = {
   daemon: boolean;
-  baseUrl: string;
   jwt: string;
 };
 
 function usage(): void {
   process.stderr.write(
-    'usage: wjscli validate [-t] <base-url> <jwt>\n' +
+    'usage: wjscli <base-url> validate <jwt> [-t]\n' +
       '  -t / --token-refresh   stay running and keep the JWT refreshed\n' +
       '  copy <jwt> from the `jwt` cookie of an authenticated browser session:\n' +
       "  in DevTools console:  copy(document.cookie.split('; ').find(c=>c.startsWith('jwt=')).slice(4))\n",
   );
 }
 
-// Parse argv for the validate subcommand. Accepts `-t` / `--token-refresh`
-// anywhere among the args (before, between, or after the two positionals).
+// Parse argv for the validate subcommand (URL has already been consumed
+// upstream in src/index.ts). Accepts `-t` / `--token-refresh` anywhere among
+// the args, before or after the JWT.
 function parseArgs(args: string[]): ParsedValidateArgs | null {
   let daemon = false;
   const positional: string[] = [];
@@ -60,12 +60,13 @@ function parseArgs(args: string[]): ParsedValidateArgs | null {
       positional.push(a);
     }
   }
-  if (positional.length !== 2) return null;
-  const [baseUrl, jwt] = positional;
-  return { daemon, baseUrl, jwt };
+  if (positional.length !== 1) return null;
+  const [jwt] = positional;
+  return { daemon, jwt };
 }
 
 export async function runValidate(
+  baseUrl: string,
   args: string[],
   deps: RunValidateDeps = {},
 ): Promise<number> {
@@ -75,9 +76,11 @@ export async function runValidate(
     return 2;
   }
 
-  let baseUrl: string;
+  // baseUrl was already canonicalized by the caller; defensively re-canonicalize
+  // to keep this entry point self-contained and tolerant of direct test calls.
+  let canonicalBaseUrl: string;
   try {
-    baseUrl = canonicalizeBaseUrl(parsed.baseUrl);
+    canonicalBaseUrl = canonicalizeBaseUrl(baseUrl);
   } catch (err) {
     process.stderr.write(
       `wjscli: ${err instanceof Error ? err.message : String(err)}\n`,
@@ -93,9 +96,9 @@ export async function runValidate(
     return 2;
   }
 
-  process.stderr.write(`Connecting to ${baseUrl}…\n`);
+  process.stderr.write(`Connecting to ${canonicalBaseUrl}…\n`);
 
-  const probeStore = TokenStore.inMemory(baseUrl, parsed.jwt);
+  const probeStore = TokenStore.inMemory(canonicalBaseUrl, parsed.jwt);
   const probeClient = new WikiClient({
     tokenStore: probeStore,
     ...(deps.fetchImpl !== undefined ? { fetchImpl: deps.fetchImpl } : {}),
@@ -134,7 +137,7 @@ export async function runValidate(
   // probeStore.getToken() reflects any new-jwt refresh the server included on
   // the probe response. That's the value we want to persist.
   const cfg: ConfigFile = {
-    baseUrl,
+    baseUrl: canonicalBaseUrl,
     jwt: probeStore.getToken(),
     refreshedAt: probeStore.getRefreshedAt(),
   };
@@ -148,14 +151,16 @@ export async function runValidate(
     return 1;
   }
 
-  process.stderr.write(`✓ Config written to ${configPathForBaseUrl(baseUrl)}\n`);
+  process.stderr.write(
+    `✓ Config written to ${configPathForBaseUrl(canonicalBaseUrl)}\n`,
+  );
 
   if (!parsed.daemon) {
     return 0;
   }
 
   const daemonRunner = deps.runDaemon ?? runRefreshDaemon;
-  return daemonRunner(baseUrl, deps.fetchImpl);
+  return daemonRunner(canonicalBaseUrl, deps.fetchImpl);
 }
 
 function reportProbeError(err: unknown): number {

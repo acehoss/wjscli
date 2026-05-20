@@ -82,30 +82,41 @@ describe('main — argv routing', () => {
     expect(await main(argv('--bogus'))).toBe(2);
   });
 
-  it('routes validate to runValidate (rejects bad URL → exit 2)', async () => {
+  it('routes <url> validate to runValidate (rejects bad URL → exit 2)', async () => {
     // No network call needed: validate rejects on URL parse before fetching.
-    expect(await main(argv('validate', 'not a url', 'a.b.c'))).toBe(2);
+    expect(await main(argv('not a url', 'validate', 'a.b.c'))).toBe(2);
   });
 
-  it('bare validate (no URL, no JWT) routes through and exits 2', async () => {
+  it('<url> validate with no JWT routes through and exits 2', async () => {
     // Proves the validate subcommand is wired up even when no positional
     // args follow. runValidate handles the usage error.
-    expect(await main(argv('validate'))).toBe(2);
+    expect(await main(argv('https://wiki.example.com', 'validate'))).toBe(2);
   });
 
-  it('routes mcp <url> to runServer (missing config → exit 1)', async () => {
-    expect(await main(argv('mcp', 'https://wiki.example.com'))).toBe(1);
+  it('routes <url> mcp to runServer (missing config → exit 1)', async () => {
+    expect(await main(argv('https://wiki.example.com', 'mcp'))).toBe(1);
   });
 
-  it('routes a bare URL to the CLI dispatcher (no command → exit 2)', async () => {
-    // CLI mode with a URL but no command word fails inside runCli with the
-    // "unknown command" usage error.
+  it('rejects subcommand-first ordering with a friendly hint', async () => {
+    // `validate` and `mcp` are subcommands; URL must come first. Pre-empt
+    // the URL parse so the user gets a useful message instead of
+    // "invalid base URL: validate".
+    expect(await main(argv('validate', 'https://wiki.example.com', 'a.b.c'))).toBe(2);
+    expect(stderrWrites.join('')).toContain('base URL must come first');
+  });
+
+  it('mcp-first ordering also gets the friendly hint', async () => {
+    expect(await main(argv('mcp', 'https://wiki.example.com'))).toBe(2);
+    expect(stderrWrites.join('')).toContain('base URL must come first');
+  });
+
+  it('routes a bare URL with no subcommand to a usage error', async () => {
     expect(await main(argv('https://wiki.example.com'))).toBe(2);
-    expect(stderrWrites.join('')).toContain('unknown command');
+    expect(stderrWrites.join('')).toContain('subcommand is required');
   });
 
   it('routes <url> tags list to the CLI (missing config → exit 1)', async () => {
     expect(await main(argv('https://wiki.example.com', 'tags', 'list'))).toBe(1);
-    expect(stderrWrites.join('')).toContain('wjscli validate');
+    expect(stderrWrites.join('')).toContain('validate');
   });
 });

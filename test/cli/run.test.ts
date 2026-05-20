@@ -61,30 +61,26 @@ const stdoutText = (): string => stdoutChunks.join('');
 const stderrText = (): string => stderrChunks.join('');
 
 describe('runCli — usage', () => {
-  it('exits 2 with no args', async () => {
-    expect(await runCli([])).toBe(2);
+  it('exits 2 with no command after the URL', async () => {
+    expect(await runCli(mock.url, [])).toBe(2);
     expect(stderrText()).toContain('Commands:');
   });
 
-  it('exits 2 with only a URL (no command)', async () => {
-    expect(await runCli([mock.url])).toBe(2);
-    expect(stderrText()).toContain('unknown command');
-  });
-
   it('exits 2 with an unknown command', async () => {
-    expect(await runCli([mock.url, 'page', 'nope'])).toBe(2);
+    expect(await runCli(mock.url, ['page', 'nope'])).toBe(2);
     expect(stderrText()).toContain('unknown command');
   });
 
   it('exits 2 on a malformed URL', async () => {
-    expect(await runCli(['not a url', 'tags', 'list'])).toBe(2);
+    expect(await runCli('not a url', ['tags', 'list'])).toBe(2);
   });
 });
 
 describe('runCli — missing config', () => {
   it('exits 1 with a hint to run validate', async () => {
-    expect(await runCli([mock.url, 'tags', 'list'])).toBe(1);
-    expect(stderrText()).toContain('wjscli validate');
+    expect(await runCli(mock.url, ['tags', 'list'])).toBe(1);
+    expect(stderrText()).toContain('wjscli');
+    expect(stderrText()).toContain('validate');
   });
 });
 
@@ -108,7 +104,7 @@ describe('runCli — tags list (happy path)', () => {
         updatedAt: '2026-05-19T00:00:00Z',
       },
     ]);
-    expect(await runCli([mock.url, 'tags', 'list'])).toBe(0);
+    expect(await runCli(mock.url, ['tags', 'list'])).toBe(0);
     expect(stdoutText()).toContain('guide');
     expect(stdoutText()).toContain('spec');
   });
@@ -123,7 +119,7 @@ describe('runCli — tags list (happy path)', () => {
         updatedAt: '2026-05-19T00:00:00Z',
       },
     ]);
-    expect(await runCli([mock.url, 'tags', 'list', '--json'])).toBe(0);
+    expect(await runCli(mock.url, ['tags', 'list', '--json'])).toBe(0);
     const out = JSON.parse(stdoutText()) as { tags: Array<{ tag: string }> };
     expect(out.tags[0]?.tag).toBe('guide');
   });
@@ -159,13 +155,13 @@ describe('runCli — pages tree', () => {
         locale: 'en',
       },
     ]);
-    expect(await runCli([mock.url, 'pages', 'tree'])).toBe(0);
+    expect(await runCli(mock.url, ['pages', 'tree'])).toBe(0);
     expect(stdoutText()).toMatch(/- \[1\] Home/);
     expect(stdoutText()).toMatch(/  - \[2\] Child/);
   });
 
   it('rejects an invalid --mode', async () => {
-    expect(await runCli([mock.url, 'pages', 'tree', '--mode', 'BOGUS'])).toBe(2);
+    expect(await runCli(mock.url, ['pages', 'tree', '--mode', 'BOGUS'])).toBe(2);
     expect(stderrText()).toContain('--mode must be');
   });
 });
@@ -174,13 +170,13 @@ describe('runCli — page get', () => {
   beforeEach(seedConfig);
 
   it('requires exactly one of --id / --path', async () => {
-    expect(await runCli([mock.url, 'page', 'get'])).toBe(2);
+    expect(await runCli(mock.url, ['page', 'get'])).toBe(2);
     expect(stderrText()).toContain('exactly one of --id or --path');
   });
 
   it('rejects both --id and --path', async () => {
     expect(
-      await runCli([mock.url, 'page', 'get', '--id', '1', '--path', 'home']),
+      await runCli(mock.url, ['page', 'get', '--id', '1', '--path', 'home']),
     ).toBe(2);
   });
 
@@ -213,7 +209,7 @@ describe('runCli — page get', () => {
       creatorName: 'A',
       creatorEmail: 'a@b',
     });
-    expect(await runCli([mock.url, 'page', 'get', '--id', '1'])).toBe(0);
+    expect(await runCli(mock.url, ['page', 'get', '--id', '1'])).toBe(0);
     expect(stdoutText()).toContain('title: Home');
     expect(stdoutText()).toContain('--- content ---');
     expect(stdoutText()).toContain('hello');
@@ -224,7 +220,7 @@ describe('runCli — page create', () => {
   beforeEach(seedConfig);
 
   it('rejects when --path/--title/--content missing', async () => {
-    expect(await runCli([mock.url, 'page', 'create'])).toBe(2);
+    expect(await runCli(mock.url, ['page', 'create'])).toBe(2);
   });
 
   it('creates a page with required fields', async () => {
@@ -241,8 +237,7 @@ describe('runCli — page create', () => {
       },
     });
     expect(
-      await runCli([
-        mock.url,
+      await runCli(mock.url, [
         'page',
         'create',
         '--path',
@@ -262,7 +257,7 @@ describe('runCli — search', () => {
   beforeEach(seedConfig);
 
   it('requires a query positional', async () => {
-    expect(await runCli([mock.url, 'search'])).toBe(2);
+    expect(await runCli(mock.url, ['search'])).toBe(2);
     expect(stderrText()).toContain('query');
   });
 
@@ -274,7 +269,7 @@ describe('runCli — search', () => {
       suggestions: [],
       totalHits: 1,
     });
-    expect(await runCli([mock.url, 'search', 'needle'])).toBe(0);
+    expect(await runCli(mock.url, ['search', 'needle'])).toBe(0);
     expect(stdoutText()).toContain('totalHits: 1');
     expect(stdoutText()).toContain('Found');
   });
@@ -285,7 +280,7 @@ describe('runCli — tool execution error', () => {
 
   it('surfaces a non-auth GraphQL error to stderr, exits 1', async () => {
     mock.setNext({ errors: [{ message: 'upstream barf' }] });
-    expect(await runCli([mock.url, 'tags', 'list'])).toBe(1);
+    expect(await runCli(mock.url, ['tags', 'list'])).toBe(1);
     expect(stderrText()).toContain('upstream barf');
     expect(stderrText()).toContain('graphql');
   });
@@ -294,7 +289,7 @@ describe('runCli — tool execution error', () => {
     mock.setNext({
       errors: [{ message: 'You must be authenticated to access this resource.' }],
     });
-    expect(await runCli([mock.url, 'tags', 'list'])).toBe(1);
+    expect(await runCli(mock.url, ['tags', 'list'])).toBe(1);
     expect(stderrText()).toContain('JWT');
   });
 });

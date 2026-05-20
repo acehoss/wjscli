@@ -50,40 +50,40 @@ const stderrText = (): string => stderrChunks.join('');
 
 describe('runValidate — usage errors', () => {
   it('returns 2 with no args', async () => {
-    expect(await runValidate([])).toBe(2);
+    expect(await runValidate(mock.url, [])).toBe(2);
   });
 
-  it('returns 2 with one arg', async () => {
-    expect(await runValidate(['https://wiki.example.com'])).toBe(2);
+  it('returns 2 with two positional args (JWT only expected)', async () => {
+    expect(await runValidate(mock.url, [validJwt, 'extra'])).toBe(2);
   });
 
   it('returns 2 on an invalid URL', async () => {
-    expect(await runValidate(['not a url', validJwt])).toBe(2);
+    expect(await runValidate('not a url', [validJwt])).toBe(2);
   });
 
   it('returns 2 on a non-http(s) scheme', async () => {
-    expect(await runValidate(['ftp://wiki.example.com', validJwt])).toBe(2);
+    expect(await runValidate('ftp://wiki.example.com', [validJwt])).toBe(2);
   });
 
   describe('JWT shape rejection', () => {
     it('rejects a single-segment string', async () => {
-      expect(await runValidate([mock.url, 'not-a-jwt'])).toBe(2);
+      expect(await runValidate(mock.url, ['not-a-jwt'])).toBe(2);
     });
 
     it('rejects an empty string', async () => {
-      expect(await runValidate([mock.url, ''])).toBe(2);
+      expect(await runValidate(mock.url, [''])).toBe(2);
     });
 
     it('rejects a two-segment value', async () => {
-      expect(await runValidate([mock.url, 'aaaa.bbbb'])).toBe(2);
+      expect(await runValidate(mock.url, ['aaaa.bbbb'])).toBe(2);
     });
 
     it('rejects a value with a trailing empty segment', async () => {
-      expect(await runValidate([mock.url, 'aaaa.bbbb.cccc.'])).toBe(2);
+      expect(await runValidate(mock.url, ['aaaa.bbbb.cccc.'])).toBe(2);
     });
 
     it('rejects a value with a non-base64url character (+)', async () => {
-      expect(await runValidate([mock.url, 'aaaa.bbb+b.cccc'])).toBe(2);
+      expect(await runValidate(mock.url, ['aaaa.bbb+b.cccc'])).toBe(2);
     });
   });
 });
@@ -92,7 +92,7 @@ describe('runValidate — happy path', () => {
   it('writes config with the supplied JWT (no refresh) and exits 0', async () => {
     // Default mock behavior: no new-jwt. This is the dominant real-world
     // case — Wiki.js only refreshes when the token is in the renewal window.
-    const code = await runValidate([mock.url, validJwt]);
+    const code = await runValidate(mock.url, [validJwt]);
     expect(code).toBe(0);
 
     const cfgPath = configPathForBaseUrl(mock.url);
@@ -110,33 +110,33 @@ describe('runValidate — happy path', () => {
       newJwt:
         'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJyZWZyZXNoZWQifQ.refreshedsignaturerefreshedsignature',
     });
-    const code = await runValidate([mock.url, validJwt]);
+    const code = await runValidate(mock.url, [validJwt]);
     expect(code).toBe(0);
     const cfg = await readConfig(mock.url);
     expect(cfg?.jwt).toMatch(/^eyJhbGciOiJIUzI1NiJ9\.eyJzdWIiOiJyZWZyZXNoZWQifQ\./);
   });
 
   it('sends the provided JWT in the Authorization header', async () => {
-    await runValidate([mock.url, validJwt]);
+    await runValidate(mock.url, [validJwt]);
     expect(mock.lastRequest()?.authorization).toBe(`Bearer ${validJwt}`);
   });
 
   it('canonicalizes the base URL before persisting', async () => {
     const withSlash = `${mock.url}/`;
-    const code = await runValidate([withSlash, validJwt]);
+    const code = await runValidate(withSlash, [validJwt]);
     expect(code).toBe(0);
     const cfg = await readConfig(mock.url);
     expect(cfg?.baseUrl).toBe(mock.url);
   });
 
   it('writes the auth-line confirmation to stderr with name/email/id', async () => {
-    const code = await runValidate([mock.url, validJwt]);
+    const code = await runValidate(mock.url, [validJwt]);
     expect(code).toBe(0);
     expect(stderrText()).toContain('Authenticated as Aaron Heise <aaron@example.com> (id=7)');
   });
 
   it('does not write the supplied JWT to stderr (never log JWT)', async () => {
-    await runValidate([mock.url, validJwt]);
+    await runValidate(mock.url, [validJwt]);
     expect(stderrText()).not.toContain(validJwt);
   });
 });
@@ -145,7 +145,7 @@ describe('runValidate — daemon (-t) wiring', () => {
   it('invokes runDaemon after a successful probe when -t is passed', async () => {
     let daemonCalls = 0;
     let observedBaseUrl: string | null = null;
-    const code = await runValidate([mock.url, validJwt, '-t'], {
+    const code = await runValidate(mock.url, [validJwt, '-t'], {
       runDaemon: async (baseUrl) => {
         daemonCalls += 1;
         observedBaseUrl = baseUrl;
@@ -159,7 +159,7 @@ describe('runValidate — daemon (-t) wiring', () => {
 
   it('does NOT invoke runDaemon without -t', async () => {
     let daemonCalls = 0;
-    const code = await runValidate([mock.url, validJwt], {
+    const code = await runValidate(mock.url, [validJwt], {
       runDaemon: async () => {
         daemonCalls += 1;
         return 0;
@@ -171,7 +171,7 @@ describe('runValidate — daemon (-t) wiring', () => {
 
   it('accepts --token-refresh as a long alias', async () => {
     let daemonCalls = 0;
-    await runValidate([mock.url, validJwt, '--token-refresh'], {
+    await runValidate(mock.url, [validJwt, '--token-refresh'], {
       runDaemon: async () => {
         daemonCalls += 1;
         return 0;
@@ -180,9 +180,9 @@ describe('runValidate — daemon (-t) wiring', () => {
     expect(daemonCalls).toBe(1);
   });
 
-  it('accepts -t before the positionals', async () => {
+  it('accepts -t before the positional jwt', async () => {
     let daemonCalls = 0;
-    await runValidate(['-t', mock.url, validJwt], {
+    await runValidate(mock.url, ['-t', validJwt], {
       runDaemon: async () => {
         daemonCalls += 1;
         return 0;
@@ -192,7 +192,7 @@ describe('runValidate — daemon (-t) wiring', () => {
   });
 
   it('propagates daemon exit code', async () => {
-    const code = await runValidate([mock.url, validJwt, '-t'], {
+    const code = await runValidate(mock.url, [validJwt, '-t'], {
       runDaemon: async () => 7,
     });
     expect(code).toBe(7);
@@ -202,14 +202,14 @@ describe('runValidate — daemon (-t) wiring', () => {
 describe('runValidate — failure paths', () => {
   it('exits 1 on HTTP 401 and does NOT write config', async () => {
     mock.setNext({ status: 401, body: 'Unauthorized' });
-    const code = await runValidate([mock.url, validJwt]);
+    const code = await runValidate(mock.url, [validJwt]);
     expect(code).toBe(1);
     expect(await readConfig(mock.url)).toBeNull();
   });
 
   it('exits 1 on HTTP 5xx and does NOT write config', async () => {
     mock.setNext({ status: 500, body: 'boom' });
-    const code = await runValidate([mock.url, validJwt]);
+    const code = await runValidate(mock.url, [validJwt]);
     expect(code).toBe(1);
     expect(await readConfig(mock.url)).toBeNull();
   });
@@ -223,7 +223,7 @@ describe('runValidate — failure paths', () => {
     mock.setNext({
       errors: [{ message: 'You must be authenticated to access this resource.' }],
     });
-    const code = await runValidate([mock.url, validJwt]);
+    const code = await runValidate(mock.url, [validJwt]);
     expect(code).toBe(1);
     expect(await readConfig(mock.url)).toBeNull();
     // The "JWT rejected by server" friendly hint is the AuthExpiredError-path
@@ -236,7 +236,7 @@ describe('runValidate — failure paths', () => {
     mock.setNext({
       errors: [{ message: 'Invalid token: jwt expired' }],
     });
-    const code = await runValidate([mock.url, validJwt]);
+    const code = await runValidate(mock.url, [validJwt]);
     expect(code).toBe(1);
     expect(stderrText()).toContain('JWT rejected by server');
   });
@@ -248,7 +248,7 @@ describe('runValidate — failure paths', () => {
     mock.setNext({
       errors: [{ message: 'You are not authorized to update this page.' }],
     });
-    const code = await runValidate([mock.url, validJwt]);
+    const code = await runValidate(mock.url, [validJwt]);
     expect(code).toBe(1);
     expect(stderrText()).toContain('GraphQL error');
     expect(stderrText()).not.toContain('JWT rejected by server');
@@ -258,7 +258,7 @@ describe('runValidate — failure paths', () => {
     mock.setNext({
       errors: [{ message: 'Something else went wrong' }],
     });
-    const code = await runValidate([mock.url, validJwt]);
+    const code = await runValidate(mock.url, [validJwt]);
     expect(code).toBe(1);
     expect(await readConfig(mock.url)).toBeNull();
   });
@@ -268,28 +268,28 @@ describe('runValidate — failure paths', () => {
       mock.setNext({
         data: { users: { profile: { id: 'not-a-number', email: '', name: '' } } },
       });
-      const code = await runValidate([mock.url, validJwt]);
+      const code = await runValidate(mock.url, [validJwt]);
       expect(code).toBe(1);
       expect(await readConfig(mock.url)).toBeNull();
     });
 
     it('exits 1 when data is null', async () => {
       mock.setNext({ data: null });
-      const code = await runValidate([mock.url, validJwt]);
+      const code = await runValidate(mock.url, [validJwt]);
       expect(code).toBe(1);
       expect(await readConfig(mock.url)).toBeNull();
     });
 
     it('exits 1 when users is null', async () => {
       mock.setNext({ data: { users: null } });
-      const code = await runValidate([mock.url, validJwt]);
+      const code = await runValidate(mock.url, [validJwt]);
       expect(code).toBe(1);
       expect(await readConfig(mock.url)).toBeNull();
     });
 
     it('exits 1 when profile is null', async () => {
       mock.setNext({ data: { users: { profile: null } } });
-      const code = await runValidate([mock.url, validJwt]);
+      const code = await runValidate(mock.url, [validJwt]);
       expect(code).toBe(1);
       expect(await readConfig(mock.url)).toBeNull();
     });
@@ -297,7 +297,7 @@ describe('runValidate — failure paths', () => {
 
   it('exits 1 when the server is unreachable (network error after retry)', async () => {
     await mock.close();
-    const code = await runValidate([mock.url, validJwt]);
+    const code = await runValidate(mock.url, [validJwt]);
     expect(code).toBe(1);
     expect(await readConfig(mock.url)).toBeNull();
   });

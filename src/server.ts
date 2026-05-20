@@ -16,17 +16,20 @@ export type RunServerDeps = {
 };
 
 export async function runServer(
-  args: string[],
+  rawBaseUrl: string,
+  args: string[] = [],
   deps: RunServerDeps = {},
 ): Promise<number> {
-  if (args.length !== 1) {
-    process.stderr.write('usage: wjscli mcp <base-url>\n');
+  if (args.length !== 0) {
+    process.stderr.write(
+      `usage: wjscli <base-url> mcp   (no additional args; got: ${args.join(' ')})\n`,
+    );
     return 2;
   }
 
   let baseUrl: string;
   try {
-    baseUrl = canonicalizeBaseUrl(args[0] ?? '');
+    baseUrl = canonicalizeBaseUrl(rawBaseUrl);
   } catch (err) {
     process.stderr.write(
       `wjscli: ${err instanceof Error ? err.message : String(err)}\n`,
@@ -41,7 +44,7 @@ export async function runServer(
     if (err instanceof MissingConfigError) {
       process.stderr.write(
         `wjscli: ${err.message}\n` +
-          `  No config found. Run: wjscli validate ${baseUrl} <jwt>\n`,
+          `  No config found. Run: wjscli ${baseUrl} validate <jwt>\n`,
       );
       return 1;
     }

@@ -4,15 +4,17 @@ A CLI **and** [MCP](https://modelcontextprotocol.io/) server for [Wiki.js v2](ht
 
 The same set of seven Wiki.js tools is available two ways:
 
-- **MCP stdio server** (`wjscli mcp <url>`) — for Claude Desktop, MCP Inspector, custom MCP clients.
+- **MCP stdio server** (`wjscli <url> mcp`) — for Claude Desktop, MCP Inspector, custom MCP clients.
 - **CLI** (`wjscli <url> page get --id 42`, `wjscli <url> search "needle"`, etc.) — for shells, scripts, and ad-hoc use.
+
+In every invocation, `<url>` comes first and the subcommand comes second.
 
 ## Why
 
 - **Real user attribution.** `creatorId` and `authorId` on every page edit point at the actual person, not a shared API key. The audit log is meaningful.
 - **Permissions come for free.** wjscli can only do what the user can do — Wiki.js enforces `read:pages` / `write:pages` / `manage:system` server-side against the JWT's `groups`.
 - **No admin API key needed.** Wiki.js v2's built-in API tokens require admin rights and bypass per-user permissions. wjscli avoids that by riding the regular browser JWT instead.
-- **Long-running.** Wiki.js's JWT lifetime is 30 minutes, but the server emits a `new-jwt` response header when a token is nearing expiry. wjscli captures that header and updates its stored token, so a process can stay alive indefinitely as long as it makes at least one call per 30 minutes. The `validate -t` daemon polls just often enough to keep the token live across idle stretches.
+- **Long-running.** Wiki.js's JWT lifetime is 30 minutes, but the server emits a `new-jwt` response header when a token is nearing expiry. wjscli captures that header and updates its stored token, so a process can stay alive indefinitely as long as it makes at least one call per 30 minutes. The `validate` daemon (`-t`) polls just often enough to keep the token live across idle stretches.
 - **stdio MCP.** No HTTP listener, no port. Standard MCP transport — drops into Claude Desktop and similar clients with one config block.
 
 ## Install
@@ -47,7 +49,7 @@ Requires Node ≥ 20.
 3. Validate the JWT and write the config:
 
     ```sh
-    wjscli validate https://wiki.example.com <jwt>
+    wjscli https://wiki.example.com validate <jwt>
     ```
 
     On success this writes `~/.config/wjscli/wiki.example.com.json` (mode `0600`) and prints something like:
@@ -65,7 +67,7 @@ Requires Node ≥ 20.
       "mcpServers": {
         "wikijs": {
           "command": "wjscli",
-          "args": ["mcp", "https://wiki.example.com"]
+          "args": ["https://wiki.example.com", "mcp"]
         }
       }
     }
@@ -85,9 +87,9 @@ wjscli https://wiki.example.com page get --path team/onboarding
 ## CLI surface
 
 ```text
-wjscli validate [-t] <base-url> <jwt>     Validate JWT, write config
+wjscli <base-url> validate <jwt> [-t]     Validate JWT, write config
                                           -t: stay running, keep token refreshed
-wjscli mcp <base-url>                     Start MCP stdio server
+wjscli <base-url> mcp                     Start MCP stdio server
 
 wjscli <base-url> pages tree [--parent N --mode ALL|PAGES|FOLDERS --locale L]
 wjscli <base-url> page get   --id N | --path P [--locale L]
@@ -111,7 +113,7 @@ Tags are repeatable and comma-splittable: `--tag a --tag b` or `--tag a,b` (both
 
 ### Daemon mode (`validate -t`)
 
-`wjscli validate -t <url> <jwt>` does the same one-shot probe as `validate`, writes the config, and then **keeps running** — polling Wiki.js's lightweight `users.profile` query every five minutes to give the server a chance to emit a `new-jwt` refresh header. Any refresh is persisted to the config file atomically. This keeps the stored JWT alive across idle stretches when no MCP or CLI calls are happening.
+`wjscli <url> validate <jwt> -t` does the same one-shot probe as `validate`, writes the config, and then **keeps running** — polling Wiki.js's lightweight `users.profile` query every five minutes to give the server a chance to emit a `new-jwt` refresh header. Any refresh is persisted to the config file atomically. This keeps the stored JWT alive across idle stretches when no MCP or CLI calls are happening.
 
 The daemon exits cleanly on SIGINT/SIGTERM. It also exits (non-zero) if the JWT is rejected — at that point only a fresh JWT can recover.
 
@@ -175,7 +177,7 @@ Wiki.js v2's JWT lifetime is 30 minutes from issue. The server emits a `new-jwt`
 In practice this means:
 
 - If your MCP client uses the wiki at least once every 30 minutes, the JWT stays refreshed indefinitely.
-- For idle stretches, run `wjscli validate -t <url> <jwt>` in a separate shell as a daemon — it polls every 5 minutes to keep the refresh window covered.
+- For idle stretches, run `wjscli <url> validate <jwt> -t` in a separate shell as a daemon — it polls every 5 minutes to keep the refresh window covered.
 - If the JWT expires beyond auto-refresh range, the next call gets an auth-rejection from Wiki.js → wjscli surfaces that as an `AuthExpiredError` with re-validate guidance.
 - A file watcher on the config also notices if you re-validate from another shell — a running MCP or daemon picks up the new JWT live without needing to restart.
 
@@ -184,7 +186,7 @@ In practice this means:
 When you see a tool call fail with `JWT rejected by server` or `Wiki.js rejected the JWT for <url>`, the stored token has expired beyond auto-refresh range. Two-step fix:
 
 1. Grab a fresh JWT (DevTools console or bookmarklet — see [Getting a JWT](#getting-a-jwt)).
-2. Re-run `wjscli validate <base-url> <jwt>`.
+2. Re-run `wjscli <base-url> validate <jwt>`.
 
 The running MCP server (or daemon) picks up the new config automatically (file watcher); you don't need to restart your MCP client unless a tool call was in flight.
 
@@ -223,8 +225,8 @@ The full design lives in [SPEC.md](./SPEC.md). Tests are organized as:
 - `test/token-store.test.ts` — JWT lifecycle, debounced disk writes, file watcher.
 - `test/wiki/client.test.ts` — HTTP / GraphQL / network classification, JWT redaction, retry policy, `new-jwt` capture.
 - `test/wiki/queries.test.ts` — GraphQL document pin-tests.
-- `test/validate.test.ts` — `wjscli validate` (with and without `-t`) end-to-end against an in-process Wiki.js mock.
-- `test/server.test.ts` — `wjscli mcp <url>` startup, signal handling.
+- `test/validate.test.ts` — `wjscli <url> validate` (with and without `-t`) end-to-end against an in-process Wiki.js mock.
+- `test/server.test.ts` — `wjscli <url> mcp` startup, signal handling.
 - `test/index.test.ts` — top-level argv dispatch.
 - `test/cli/argv.test.ts` — CLI argv reader unit tests.
 - `test/cli/run.test.ts` — CLI dispatch end-to-end through `runCli` against the mock.

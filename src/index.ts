@@ -1,8 +1,13 @@
 #!/usr/bin/env node
 import { runCli } from './cli/index.js';
+import { canonicalizeBaseUrl } from './config.js';
 import { runServer } from './server.js';
 import { runValidate } from './validate.js';
 import { getVersion } from './util/version.js';
+
+// Top-level subcommand names that come after <base-url>. Used to give the
+// caller a friendlier error if they put a subcommand before the URL.
+const TOP_LEVEL_COMMANDS = ['validate', 'mcp'] as const;
 
 export async function main(argv: string[]): Promise<number> {
   const args = argv.slice(2);
@@ -26,23 +31,56 @@ export async function main(argv: string[]): Promise<number> {
     return 0;
   }
 
-  if (first === 'validate') {
-    return runValidate(rest);
-  }
-
-  if (first === 'mcp') {
-    return runServer(rest);
-  }
-
   // Anything starting with `-` is an unknown option.
   if (first !== undefined && first.startsWith('-')) {
     process.stderr.write(`wjscli: unknown option: ${first}\n`);
     printUsageToStderr();
     return 2;
   }
-  // A bare URL falls through to CLI mode: `wjscli <base-url> <group> [<verb>] [options...]`.
-  // Bad URLs and bad subcommands are rejected inside runCli with exit 2.
-  return runCli(args);
+
+  // Every other invocation is `<base-url> <command> [args...]`. Catch the
+  // common ordering mistake (subcommand first) before passing the URL to
+  // canonicalizeBaseUrl, which would otherwise complain with an unhelpful
+  // "invalid base URL: validate" message.
+  if (
+    first !== undefined &&
+    TOP_LEVEL_COMMANDS.includes(first as (typeof TOP_LEVEL_COMMANDS)[number])
+  ) {
+    process.stderr.write(
+      `wjscli: \`${first}\` is a subcommand; the base URL must come first.\n` +
+        `  try: wjscli <base-url> ${first} ...\n`,
+    );
+    return 2;
+  }
+
+  let baseUrl: string;
+  try {
+    baseUrl = canonicalizeBaseUrl(first ?? '');
+  } catch (err) {
+    process.stderr.write(
+      `wjscli: ${err instanceof Error ? err.message : String(err)}\n`,
+    );
+    return 2;
+  }
+
+  const [command, ...commandArgs] = rest;
+
+  if (command === undefined) {
+    process.stderr.write('wjscli: a subcommand is required after <base-url>.\n');
+    printUsageToStderr();
+    return 2;
+  }
+
+  if (command === 'validate') {
+    return runValidate(baseUrl, commandArgs);
+  }
+
+  if (command === 'mcp') {
+    return runServer(baseUrl, commandArgs);
+  }
+
+  // Anything else falls through to the CLI dispatcher (page/pages/search/tags).
+  return runCli(baseUrl, [command, ...commandArgs]);
 }
 
 function usageText(): string {
@@ -50,9 +88,9 @@ function usageText(): string {
     'wjscli — Wiki.js v2 CLI and MCP server (auth as a real human user)',
     '',
     'Usage:',
-    '  wjscli validate [-t] <base-url> <jwt>     Validate JWT, write config',
-    '                                            -t: stay running, keep token refreshed',
-    '  wjscli mcp <base-url>                     Start MCP stdio server',
+    '  wjscli <base-url> validate <jwt> [-t]      Validate JWT, write config',
+    '                                             -t: stay running, keep token refreshed',
+    '  wjscli <base-url> mcp                      Start MCP stdio server',
     '  wjscli <base-url> page get   --id N | --path P [--locale L]',
     '  wjscli <base-url> page create --path P --title T --content C [...]',
     '  wjscli <base-url> page update --id N [fields...]',
@@ -60,8 +98,8 @@ function usageText(): string {
     '  wjscli <base-url> pages tree [--parent N --mode ALL|PAGES|FOLDERS --locale L]',
     '  wjscli <base-url> search <query> [--locale L]',
     '  wjscli <base-url> tags list',
-    '  wjscli --version                          Print version',
-    '  wjscli --help                             Print this help',
+    '  wjscli --version                           Print version',
+    '  wjscli --help                              Print this help',
     '',
     'Add --json to any CLI subcommand for raw JSON output.',
     'See SPEC.md for the full design.',
