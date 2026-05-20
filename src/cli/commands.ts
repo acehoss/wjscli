@@ -1,3 +1,9 @@
+import { GraphQLError } from '../util/errors.js';
+import type { WikiClient } from '../wiki/client.js';
+import {
+  PAGE_SINGLE_BY_PATH_QUERY,
+  type PageSingleByPathResponse,
+} from '../wiki/queries.js';
 import {
   CliUsageError,
   rejectUnknownFlags,
@@ -35,8 +41,63 @@ export type CliCommand = {
   // Sync or async — the dispatcher awaits the result either way. Commands
   // that need to resolve `@-` / `@file` content read paths return a Promise.
   parseArgs: (argv: ParsedArgv) => unknown;
+  // Optional second-stage transform. Runs after parseArgs and before
+  // dispatchTool, with a live WikiClient available. Used by `page update`
+  // and `page history` to resolve a CLI-supplied path → id (via
+  // pages.singleByPath) before calling the id-only underlying tool. May
+  // throw WikiMcpError subclasses; runCli's catch handles them.
+  resolveInput?: (input: unknown, client: WikiClient) => Promise<unknown>;
   formatHuman: (data: unknown) => string;
 };
+
+// Helper used by `page get`, `page update`, and `page history`: a positional
+// arg that's all-digits is read as a numeric Page ID; anything else is a
+// page path. Returns the normalised pair so callers can stuff it into
+// whatever input shape their underlying tool expects (or pre-resolve via
+// `resolveInput`).
+function parseIdOrPath(value: string): { id: number } | { path: string } {
+  if (/^\d+$/.test(value)) {
+    return { id: Number(value) };
+  }
+  return { path: value };
+}
+
+// Friendlier error than `rejectUnknownFlags` for the common migration
+// stumble: previously `--id` and `--path` were explicit flags on these
+// commands; now they're the positional. Throw before any other validation
+// so the user sees the migration hint immediately.
+function rejectLegacyIdPathFlags(
+  flags: Map<string, string[]>,
+  cmd: string,
+): void {
+  if (flags.has('id')) {
+    throw new CliUsageError(
+      `--id is no longer accepted on \`${cmd}\`; pass the id positionally ` +
+        `(e.g. \`${cmd} 42\`).`,
+    );
+  }
+}
+
+// Look up a page by path → return its id. Used by `page update` and
+// `page history` to support `wjscli ... page update team/onboarding ...`
+// against tools that only accept a numeric id.
+async function resolvePathToId(
+  client: WikiClient,
+  path: string,
+  locale: string,
+): Promise<number> {
+  const data = await client.gql<PageSingleByPathResponse>(
+    PAGE_SINGLE_BY_PATH_QUERY,
+    { path, locale },
+  );
+  const page = data.pages.singleByPath;
+  if (page === null) {
+    throw new GraphQLError([
+      { message: `Page not found at path "${path}" (locale ${locale}).` },
+    ]);
+  }
+  return page.id;
+}
 
 // Shared utility: format a Wiki.js ResponseStatus + page summary block.
 function formatResult(data: unknown): string {
@@ -211,43 +272,48 @@ function formatPagesTree(data: unknown): string {
 const pageGetCmd: CliCommand = {
   path: ['page', 'get'],
   toolName: 'wiki_page_get',
-  help: 'Fetch a single page by --id or by --path.',
+  help: 'Fetch a single page by id (numeric) or path.',
   usage: [
-    'wjscli <base-url> page get { --id N | --path P } [options]',
+    'wjscli <base-url> page get <id-or-path> [options]',
     '',
-    '  Fetch a single Wiki.js page by id or by path. Pass exactly one of',
-    '  --id or --path. Some fields (content, editor, author/creator details)',
-    "  require write:pages or manage:system permission server-side; if the",
-    '  user lacks them, Wiki.js returns a GraphQL error.',
+    '  Fetch a single Wiki.js page. The positional argument is auto-',
+    '  detected: an all-digits value is parsed as a numeric Page ID; any',
+    '  other string is treated as a path. Some fields (content, editor,',
+    '  author/creator details) require write:pages or manage:system',
+    '  permission server-side; if the user lacks them, Wiki.js returns a',
+    '  GraphQL error.',
     '',
     'Options:',
-    '  --id N          Page ID (mutually exclusive with --path)',
-    '  --path P        Page path (mutually exclusive with --id)',
-    '  --locale L      Locale code (used with --path; default en)',
+    '  --locale L      Locale code (applies to path lookup; default en)',
     '  --json          Output raw JSON instead of human-readable view',
     '  -h, --help      Show this help',
     '',
     'Examples:',
-    '  wjscli https://wiki.example.com page get --id 42',
-    '  wjscli https://wiki.example.com page get --path team/onboarding',
+    '  wjscli https://wiki.example.com page get 42',
+    '  wjscli https://wiki.example.com page get team/onboarding',
+    '  wjscli https://wiki.example.com page get team/onboarding --locale fr',
     '',
   ].join('\n'),
   parseArgs: ({ flags, positionals }) => {
-    if (positionals.length > 0) {
+    rejectLegacyIdPathFlags(flags, 'page get');
+    if (flags.has('path')) {
       throw new CliUsageError(
-        `page get: unexpected positional arg(s): ${positionals.join(' ')}`,
+        '--path is no longer accepted on `page get`; pass the path positionally.',
       );
     }
-    const id = takeOptionalInt(flags, 'id');
-    const path = takeOptionalString(flags, 'path');
+    if (positionals.length === 0) {
+      throw new CliUsageError(
+        'page get requires an id or path: `page get 42` or `page get team/onboarding`.',
+      );
+    }
+    if (positionals.length > 1) {
+      throw new CliUsageError(
+        `page get: unexpected extra positional arg(s): ${positionals.slice(1).join(' ')}`,
+      );
+    }
     const locale = takeOptionalString(flags, 'locale');
     rejectUnknownFlags(flags);
-    if ((id === undefined) === (path === undefined)) {
-      throw new CliUsageError('page get requires exactly one of --id or --path');
-    }
-    const input: Record<string, unknown> = {};
-    if (id !== undefined) input.id = id;
-    if (path !== undefined) input.path = path;
+    const input: Record<string, unknown> = { ...parseIdOrPath(positionals[0] ?? '') };
     if (locale !== undefined) input.locale = locale;
     return input;
   },
@@ -343,24 +409,27 @@ const pageCreateCmd: CliCommand = {
 const pageUpdateCmd: CliCommand = {
   path: ['page', 'update'],
   toolName: 'wiki_page_update',
-  help: 'Update a page. Requires --id plus at least one mutable field.',
+  help: 'Update a page identified by id (numeric) or path.',
   usage: [
-    'wjscli <base-url> page update --id N [field...]',
+    'wjscli <base-url> page update <id-or-path> [field...]',
     '',
-    '  Update an existing Wiki.js page. Only supplied fields are changed;',
-    '  unsupplied fields are preserved (the tool fetch-merge-updates under',
-    '  the hood — one extra GraphQL round-trip per call).',
+    '  Update an existing Wiki.js page. The positional argument identifies',
+    '  the page: all-digits → numeric ID; any other string → path. If a',
+    '  path is given, the CLI resolves it to an id via pages.singleByPath',
+    '  (one extra round-trip), then issues the update.',
     '',
-    'Required:',
-    '  --id N          Page ID',
+    '  Only supplied fields are changed; unsupplied fields are preserved',
+    '  (the tool fetch-merge-updates under the hood — one more round-trip).',
     '',
     'Mutable fields (supply any one or more):',
-    '  --path P',
+    '  --path P        New path (renames the page; distinct from the',
+    '                  positional identifier above)',
     '  --title T',
     '  --content C     Supports @-/@path',
     '  --description D Supports @-/@path',
     '  --editor E',
-    '  --locale L',
+    '  --locale L      New locale value (also used to disambiguate the',
+    '                  positional path lookup; default en)',
     '  --tag T         Repeatable; comma-splittable',
     '  --published / --no-published',
     '  --private / --no-private',
@@ -369,37 +438,72 @@ const pageUpdateCmd: CliCommand = {
     '  --json          Output raw JSON',
     '  -h, --help      Show this help',
     '',
-    'Example:',
-    '  wjscli https://wiki.example.com page update --id 42 \\',
-    '    --title "New title" --content @./new-body.md',
+    'Examples:',
+    '  wjscli https://wiki.example.com page update 42 --title "New title"',
+    '  wjscli https://wiki.example.com page update team/onboarding \\',
+    '    --content @./new-body.md',
+    '  wjscli https://wiki.example.com page update 42 --path team/renamed',
     '',
   ].join('\n'),
   parseArgs: async ({ flags, positionals }) => {
-    if (positionals.length > 0) {
+    rejectLegacyIdPathFlags(flags, 'page update');
+    if (positionals.length === 0) {
       throw new CliUsageError(
-        `page update: unexpected positional arg(s): ${positionals.join(' ')}`,
+        'page update requires an id or path: `page update 42 ...` or `page update team/foo ...`.',
       );
     }
-    const id = takeOptionalInt(flags, 'id');
-    if (id === undefined) {
-      throw new CliUsageError('page update requires --id');
+    if (positionals.length > 1) {
+      throw new CliUsageError(
+        `page update: unexpected extra positional arg(s): ${positionals.slice(1).join(' ')}`,
+      );
     }
-    const path = takeOptionalString(flags, 'path');
+    const ref = parseIdOrPath(positionals[0] ?? '');
+    // --path on `page update` means "new path to rename to" — the MCP tool's
+    // `path` field. It is NOT the identifying path; that's the positional.
+    const newPath = takeOptionalString(flags, 'path');
     const title = takeOptionalString(flags, 'title');
     const rawContent = takeOptionalString(flags, 'content');
     const content =
       rawContent !== undefined ? await resolveStringValue(rawContent) : undefined;
     const writeFields = await takePageWriteFields(flags);
     rejectUnknownFlags(flags);
-    const input: Record<string, unknown> = { id };
-    if (path !== undefined) input.path = path;
+
+    const input: Record<string, unknown> = {};
+    if ('id' in ref) {
+      input.id = ref.id;
+    } else {
+      // _lookupPath is consumed by resolveInput below and never reaches the
+      // MCP tool (the leading underscore marks it as a CLI-internal field).
+      input._lookupPath = ref.path;
+    }
+    if (newPath !== undefined) input.path = newPath;
     if (title !== undefined) input.title = title;
     if (content !== undefined) input.content = content;
     Object.assign(input, writeFields);
-    if (Object.keys(input).length === 1) {
-      throw new CliUsageError('page update requires at least one field besides --id');
+
+    // Must have at least one mutable field; the identifier on its own is
+    // not enough to do anything useful.
+    const mutableKeys = Object.keys(input).filter(
+      (k) => k !== 'id' && k !== '_lookupPath',
+    );
+    if (mutableKeys.length === 0) {
+      throw new CliUsageError(
+        'page update requires at least one field to change (e.g. --title, --content, --path).',
+      );
     }
     return input;
+  },
+  resolveInput: async (rawInput, client) => {
+    const input = rawInput as { _lookupPath?: string; locale?: string } & Record<
+      string,
+      unknown
+    >;
+    if (input._lookupPath === undefined) return input;
+    const lookupLocale = typeof input.locale === 'string' ? input.locale : 'en';
+    const id = await resolvePathToId(client, input._lookupPath, lookupLocale);
+    const { _lookupPath: _drop, ...rest } = input;
+    void _drop;
+    return { ...rest, id };
   },
   formatHuman: formatResult,
 };
@@ -409,43 +513,68 @@ const pageUpdateCmd: CliCommand = {
 const pageHistoryCmd: CliCommand = {
   path: ['page', 'history'],
   toolName: 'wiki_page_history',
-  help: 'Fetch revision history of a page.',
+  help: 'Fetch revision history of a page (id or path).',
   usage: [
-    'wjscli <base-url> page history --id N [options]',
+    'wjscli <base-url> page history <id-or-path> [options]',
     '',
-    '  Fetch the revision history of a Wiki.js page. Requires manage:system',
+    '  Fetch the revision history of a Wiki.js page. The positional',
+    '  argument is auto-detected: all-digits → numeric ID; any other',
+    '  string → path. Path identifiers are resolved to an id via',
+    '  pages.singleByPath (one extra round-trip). Requires manage:system',
     '  or read:history permission server-side.',
-    '',
-    'Required:',
-    '  --id N            Page ID',
     '',
     'Options:',
     '  --offset-page N   Page offset for pagination (default 0)',
     '  --offset-size N   Page size for pagination (Wiki.js default 100)',
+    '  --locale L        Locale for the path → id lookup (default en)',
     '  --json            Output raw JSON',
     '  -h, --help        Show this help',
     '',
-    'Example:',
-    '  wjscli https://wiki.example.com page history --id 42',
+    'Examples:',
+    '  wjscli https://wiki.example.com page history 42',
+    '  wjscli https://wiki.example.com page history team/onboarding',
     '',
   ].join('\n'),
   parseArgs: ({ flags, positionals }) => {
-    if (positionals.length > 0) {
+    rejectLegacyIdPathFlags(flags, 'page history');
+    if (positionals.length === 0) {
       throw new CliUsageError(
-        `page history: unexpected positional arg(s): ${positionals.join(' ')}`,
+        'page history requires an id or path: `page history 42` or `page history team/foo`.',
       );
     }
-    const id = takeOptionalInt(flags, 'id');
-    if (id === undefined) {
-      throw new CliUsageError('page history requires --id');
+    if (positionals.length > 1) {
+      throw new CliUsageError(
+        `page history: unexpected extra positional arg(s): ${positionals.slice(1).join(' ')}`,
+      );
     }
+    const ref = parseIdOrPath(positionals[0] ?? '');
     const offsetPage = takeOptionalInt(flags, 'offset-page');
     const offsetSize = takeOptionalInt(flags, 'offset-size');
+    const lookupLocale = takeOptionalString(flags, 'locale');
     rejectUnknownFlags(flags);
-    const input: Record<string, unknown> = { id };
+    const input: Record<string, unknown> = {};
+    if ('id' in ref) {
+      input.id = ref.id;
+    } else {
+      input._lookupPath = ref.path;
+      if (lookupLocale !== undefined) input._lookupLocale = lookupLocale;
+    }
     if (offsetPage !== undefined) input.offsetPage = offsetPage;
     if (offsetSize !== undefined) input.offsetSize = offsetSize;
     return input;
+  },
+  resolveInput: async (rawInput, client) => {
+    const input = rawInput as {
+      _lookupPath?: string;
+      _lookupLocale?: string;
+    } & Record<string, unknown>;
+    if (input._lookupPath === undefined) return input;
+    const lookupLocale = input._lookupLocale ?? 'en';
+    const id = await resolvePathToId(client, input._lookupPath, lookupLocale);
+    const { _lookupPath: _dropPath, _lookupLocale: _dropLocale, ...rest } = input;
+    void _dropPath;
+    void _dropLocale;
+    return { ...rest, id };
   },
   formatHuman: (data) => {
     const d = data as { trail?: Array<Record<string, unknown>> | null; total?: number };

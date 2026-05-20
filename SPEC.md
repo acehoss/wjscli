@@ -94,6 +94,8 @@ Command-words are matched positionally against the registry in `src/cli/commands
 
 Each CLI command parses flags into the same input object the MCP tool accepts, then dispatches through `dispatchTool` (the same code path used by the MCP server). Output is human-readable by default (per-command formatter in `src/cli/commands.ts`); `--json` switches to raw JSON parity with MCP.
 
+`page get`, `page update`, and `page history` take a positional `<id-or-path>` after the verb. The parser auto-detects: an all-digits value is read as a numeric ID; anything else is treated as a path. For commands whose underlying MCP tool only accepts an id (`wiki_page_update`, `wiki_page_history`), the CLI runs an extra `pages.singleByPath` query in an optional `CliCommand.resolveInput` hook to convert the path to an id before `dispatchTool`. The MCP tool schemas are unchanged.
+
 Tool-execution errors (HTTP / GraphQL / network) surface to stderr with the structured `{code, message}` payload, exit `1`. `AuthExpiredError` similarly exits `1` with a re-validate hint.
 
 Every subcommand (`validate`, `mcp`, and each CLI command) recognises `-h` / `--help` at any position in its args. Help text is printed to stdout (it's a user request, so it's pipeable) and the process exits `0`. Help short-circuits before any config-loading or arg-validation, so `wjscli <url> page update --id 42 -h` prints the page-update help even though `--id` alone would otherwise be a usage error.

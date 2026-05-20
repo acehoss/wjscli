@@ -84,17 +84,17 @@ describe('runCli — per-command help flag', () => {
     expect(stdoutText()).toContain('--depth');
   });
 
-  it('page get --help works without --id or --path', async () => {
+  it('page get --help describes the id-or-path positional', async () => {
     expect(await runCli(mock.url, ['page', 'get', '--help'])).toBe(0);
     expect(stdoutText()).toContain('wjscli <base-url> page get');
-    expect(stdoutText()).toContain('mutually exclusive');
+    expect(stdoutText()).toContain('id-or-path');
   });
 
   it('--help interleaved with other args still triggers help (no validation)', async () => {
     // No config seeded; we'd normally exit 1 on missing config. Help short-
     // circuits before that path even runs.
     expect(
-      await runCli(mock.url, ['page', 'update', '--id', '42', '-h']),
+      await runCli(mock.url, ['page', 'update', '42', '-h']),
     ).toBe(0);
     expect(stdoutText()).toContain('wjscli <base-url> page update');
   });
@@ -297,50 +297,304 @@ describe('runCli — pages tree', () => {
 describe('runCli — page get', () => {
   beforeEach(seedConfig);
 
-  it('requires exactly one of --id / --path', async () => {
+  const samplePage = {
+    id: 1,
+    path: 'home',
+    hash: 'h',
+    title: 'Home',
+    description: 'desc',
+    isPrivate: false,
+    isPublished: true,
+    privateNS: null,
+    publishStartDate: '2026-05-19T00:00:00Z',
+    publishEndDate: '2099-01-01T00:00:00Z',
+    tags: [],
+    content: 'hello',
+    render: null,
+    contentType: 'markdown',
+    createdAt: '2026-05-19T00:00:00Z',
+    updatedAt: '2026-05-19T00:00:00Z',
+    editor: 'markdown',
+    locale: 'en',
+    scriptCss: null,
+    scriptJs: null,
+    authorId: 7,
+    authorName: 'A',
+    authorEmail: 'a@b',
+    creatorId: 7,
+    creatorName: 'A',
+    creatorEmail: 'a@b',
+  };
+
+  it('requires a positional id-or-path', async () => {
     expect(await runCli(mock.url, ['page', 'get'])).toBe(2);
-    expect(stderrText()).toContain('exactly one of --id or --path');
+    expect(stderrText()).toContain('id or path');
   });
 
-  it('rejects both --id and --path', async () => {
-    expect(
-      await runCli(mock.url, ['page', 'get', '--id', '1', '--path', 'home']),
-    ).toBe(2);
+  it('rejects legacy --id with a migration hint', async () => {
+    expect(await runCli(mock.url, ['page', 'get', '--id', '42'])).toBe(2);
+    expect(stderrText()).toContain('no longer accepted');
   });
 
-  it('fetches by --id and renders human output', async () => {
-    mock.replyToSinglePage({
-      id: 1,
-      path: 'home',
-      hash: 'h',
-      title: 'Home',
-      description: 'desc',
-      isPrivate: false,
-      isPublished: true,
-      privateNS: null,
-      publishStartDate: '2026-05-19T00:00:00Z',
-      publishEndDate: '2099-01-01T00:00:00Z',
-      tags: [],
-      content: 'hello',
-      render: null,
-      contentType: 'markdown',
-      createdAt: '2026-05-19T00:00:00Z',
-      updatedAt: '2026-05-19T00:00:00Z',
-      editor: 'markdown',
-      locale: 'en',
-      scriptCss: null,
-      scriptJs: null,
-      authorId: 7,
-      authorName: 'A',
-      authorEmail: 'a@b',
-      creatorId: 7,
-      creatorName: 'A',
-      creatorEmail: 'a@b',
-    });
-    expect(await runCli(mock.url, ['page', 'get', '--id', '1'])).toBe(0);
+  it('rejects legacy --path with a migration hint', async () => {
+    expect(await runCli(mock.url, ['page', 'get', '--path', 'home'])).toBe(2);
+    expect(stderrText()).toContain('no longer accepted');
+  });
+
+  it('numeric positional → page get by id', async () => {
+    mock.replyToSinglePage(samplePage);
+    expect(await runCli(mock.url, ['page', 'get', '1'])).toBe(0);
     expect(stdoutText()).toContain('title: Home');
-    expect(stdoutText()).toContain('--- content ---');
     expect(stdoutText()).toContain('hello');
+    // Verify the GraphQL call used the by-id query (not by-path).
+    const body = mock.lastRequest()?.parsed as
+      | { query?: string; variables?: Record<string, unknown> }
+      | null;
+    expect(body?.variables).toMatchObject({ id: 1 });
+  });
+
+  it('non-numeric positional → page get by path', async () => {
+    mock.replyToSinglePageByPath(samplePage);
+    expect(await runCli(mock.url, ['page', 'get', 'home'])).toBe(0);
+    expect(stdoutText()).toContain('title: Home');
+    const body = mock.lastRequest()?.parsed as
+      | { query?: string; variables?: Record<string, unknown> }
+      | null;
+    expect(body?.variables).toMatchObject({ path: 'home', locale: 'en' });
+  });
+
+  it('path with slash → page get by path', async () => {
+    mock.replyToSinglePageByPath(samplePage);
+    expect(await runCli(mock.url, ['page', 'get', 'team/onboarding'])).toBe(0);
+    const body = mock.lastRequest()?.parsed as
+      | { query?: string; variables?: Record<string, unknown> }
+      | null;
+    expect(body?.variables).toMatchObject({ path: 'team/onboarding' });
+  });
+
+  it('--locale is forwarded with path-based lookup', async () => {
+    mock.replyToSinglePageByPath(samplePage);
+    expect(
+      await runCli(mock.url, ['page', 'get', 'team/onboarding', '--locale', 'fr']),
+    ).toBe(0);
+    const body = mock.lastRequest()?.parsed as
+      | { query?: string; variables?: Record<string, unknown> }
+      | null;
+    expect(body?.variables).toMatchObject({
+      path: 'team/onboarding',
+      locale: 'fr',
+    });
+  });
+});
+
+describe('runCli — page update', () => {
+  beforeEach(seedConfig);
+
+  const okResponse = {
+    data: {
+      pages: {
+        update: {
+          responseResult: {
+            succeeded: true,
+            errorCode: 0,
+            slug: 'ok',
+            message: 'OK',
+          },
+          page: {
+            id: 42,
+            path: 'home',
+            title: 'Home',
+            isPrivate: false,
+            isPublished: true,
+            createdAt: '2026-05-19T00:00:00Z',
+            updatedAt: '2026-05-19T00:00:00Z',
+          },
+        },
+      },
+    },
+  };
+
+  const fullPageForFetch = {
+    id: 42,
+    path: 'home',
+    hash: 'h',
+    title: 'Home',
+    description: 'desc',
+    isPrivate: false,
+    isPublished: true,
+    privateNS: null,
+    publishStartDate: '2026-05-19T00:00:00Z',
+    publishEndDate: '2099-01-01T00:00:00Z',
+    tags: [],
+    content: 'old',
+    render: null,
+    contentType: 'markdown',
+    createdAt: '2026-05-19T00:00:00Z',
+    updatedAt: '2026-05-19T00:00:00Z',
+    editor: 'markdown',
+    locale: 'en',
+    scriptCss: null,
+    scriptJs: null,
+    authorId: 7,
+    authorName: 'A',
+    authorEmail: 'a@b',
+    creatorId: 7,
+    creatorName: 'A',
+    creatorEmail: 'a@b',
+  };
+
+  it('rejects legacy --id with a migration hint', async () => {
+    expect(
+      await runCli(mock.url, ['page', 'update', '--id', '42', '--title', 'X']),
+    ).toBe(2);
+    expect(stderrText()).toContain('no longer accepted');
+  });
+
+  it('requires a positional and at least one mutable field', async () => {
+    expect(await runCli(mock.url, ['page', 'update'])).toBe(2);
+    expect(stderrText()).toContain('id or path');
+  });
+
+  it('numeric positional → fetch-by-id then update', async () => {
+    // First call: PAGE_SINGLE_QUERY (id-based fetch from update tool's
+    // fetch-merge-update). Second call: the update mutation.
+    let call = 0;
+    mock.setDispatcher(() => {
+      call += 1;
+      if (call === 1) return { data: { pages: { single: fullPageForFetch } } };
+      return okResponse;
+    });
+    expect(
+      await runCli(mock.url, ['page', 'update', '42', '--title', 'New']),
+    ).toBe(0);
+    expect(stdoutText()).toContain('✓');
+    expect(call).toBe(2); // no path-resolution step
+  });
+
+  it('path positional → resolve via singleByPath, then update', async () => {
+    // Three calls: (1) CLI resolveInput → pages.singleByPath; (2) tool's
+    // fetch-merge-update → pages.single by the resolved id; (3) update.
+    let call = 0;
+    mock.setDispatcher(() => {
+      call += 1;
+      if (call === 1) return { data: { pages: { singleByPath: { id: 42 } } } };
+      if (call === 2) return { data: { pages: { single: fullPageForFetch } } };
+      return okResponse;
+    });
+    expect(
+      await runCli(mock.url, ['page', 'update', 'home', '--title', 'New']),
+    ).toBe(0);
+    expect(stdoutText()).toContain('✓');
+    expect(call).toBe(3);
+  });
+
+  it('path not found → exit 1 with friendly message', async () => {
+    mock.setDispatcher(() => ({
+      data: { pages: { singleByPath: null } },
+    }));
+    expect(
+      await runCli(mock.url, ['page', 'update', 'nope/page', '--title', 'X']),
+    ).toBe(1);
+    expect(stderrText()).toContain('Page not found at path');
+  });
+
+  it('--path still renames the page (new path, not the lookup)', async () => {
+    let call = 0;
+    let updateVariables: Record<string, unknown> | null = null;
+    mock.setDispatcher((req) => {
+      call += 1;
+      if (call === 1) return { data: { pages: { single: fullPageForFetch } } };
+      updateVariables =
+        ((req.parsed?.variables as Record<string, unknown>) ?? null) as
+          | Record<string, unknown>
+          | null;
+      return okResponse;
+    });
+    expect(
+      await runCli(mock.url, ['page', 'update', '42', '--path', 'home/renamed']),
+    ).toBe(0);
+    expect(updateVariables).not.toBeNull();
+    expect(updateVariables).toMatchObject({ id: 42, path: 'home/renamed' });
+  });
+});
+
+describe('runCli — page history', () => {
+  beforeEach(seedConfig);
+
+  const historyResponse = {
+    data: {
+      pages: {
+        history: {
+          trail: [
+            {
+              versionId: 1,
+              versionDate: '2026-05-19T00:00:00Z',
+              authorId: 7,
+              authorName: 'A',
+              actionType: 'updated',
+              valueBefore: null,
+              valueAfter: null,
+            },
+          ],
+          total: 1,
+        },
+      },
+    },
+  };
+
+  it('rejects legacy --id', async () => {
+    expect(
+      await runCli(mock.url, ['page', 'history', '--id', '42']),
+    ).toBe(2);
+    expect(stderrText()).toContain('no longer accepted');
+  });
+
+  it('numeric positional → direct history call', async () => {
+    let call = 0;
+    let lastVariables: Record<string, unknown> | null = null;
+    mock.setDispatcher((req) => {
+      call += 1;
+      lastVariables = (req.parsed?.variables as Record<string, unknown>) ?? null;
+      return historyResponse;
+    });
+    expect(await runCli(mock.url, ['page', 'history', '42'])).toBe(0);
+    expect(call).toBe(1);
+    expect(lastVariables).toMatchObject({ id: 42 });
+    expect(stdoutText()).toContain('total: 1');
+  });
+
+  it('path positional → singleByPath lookup, then history', async () => {
+    let call = 0;
+    let lastVariables: Record<string, unknown> | null = null;
+    mock.setDispatcher((req) => {
+      call += 1;
+      lastVariables = (req.parsed?.variables as Record<string, unknown>) ?? null;
+      if (call === 1) return { data: { pages: { singleByPath: { id: 99 } } } };
+      return historyResponse;
+    });
+    expect(
+      await runCli(mock.url, ['page', 'history', 'team/onboarding']),
+    ).toBe(0);
+    expect(call).toBe(2);
+    // Last call (the history call) used the resolved id.
+    expect(lastVariables).toMatchObject({ id: 99 });
+  });
+
+  it('--locale is used for the path lookup', async () => {
+    let firstVariables: Record<string, unknown> | null = null;
+    let call = 0;
+    mock.setDispatcher((req) => {
+      call += 1;
+      if (call === 1) {
+        firstVariables = (req.parsed?.variables as Record<string, unknown>) ?? null;
+        return { data: { pages: { singleByPath: { id: 99 } } } };
+      }
+      return historyResponse;
+    });
+    expect(
+      await runCli(mock.url, ['page', 'history', 'team/x', '--locale', 'fr']),
+    ).toBe(0);
+    expect(firstVariables).toMatchObject({ path: 'team/x', locale: 'fr' });
   });
 });
 

@@ -80,9 +80,11 @@ You can also drive the same tools directly:
 ```sh
 wjscli https://wiki.example.com tags list
 wjscli https://wiki.example.com search "onboarding"
-wjscli https://wiki.example.com page get --id 42
-wjscli https://wiki.example.com page get --path team/onboarding
+wjscli https://wiki.example.com page get 42
+wjscli https://wiki.example.com page get team/onboarding
 ```
+
+For `page get`, `page update`, and `page history`, the positional `<id-or-path>` is auto-detected: an all-digits value is a numeric Page ID; anything else is treated as a path. `page update` and `page history` resolve a path to an id with an extra `pages.singleByPath` call.
 
 ## CLI surface
 
@@ -92,10 +94,10 @@ wjscli <base-url> validate <jwt> [-t]     Validate JWT, write config
 wjscli <base-url> mcp                     Start MCP stdio server
 
 wjscli <base-url> pages tree [--parent N --mode ALL|PAGES|FOLDERS --locale L --depth N]
-wjscli <base-url> page get   --id N | --path P [--locale L]
+wjscli <base-url> page get <id-or-path> [--locale L]
 wjscli <base-url> page create --path P --title T --content C [...]
-wjscli <base-url> page update --id N [fields...]
-wjscli <base-url> page history --id N [--offset-page N --offset-size N]
+wjscli <base-url> page update <id-or-path> [fields...]
+wjscli <base-url> page history <id-or-path> [--offset-page N --offset-size N --locale L]
 wjscli <base-url> search <query> [--locale L]
 wjscli <base-url> tags list
 

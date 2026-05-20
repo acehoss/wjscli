@@ -94,6 +94,13 @@ export async function runCli(
 
   let exitCode = 0;
   try {
+    // Second-stage transform with a live client (used by page update /
+    // page history to resolve a CLI-supplied path → id before calling the
+    // id-only underlying tool). Errors from this step are caught by the
+    // same WikiMcpError / Error catch below.
+    if (command.resolveInput !== undefined) {
+      input = await command.resolveInput(input, wikiClient);
+    }
     const result = await dispatchTool(command.toolName, input, wikiClient);
     const text = result.content[0]?.text ?? '';
     let payload: unknown;
