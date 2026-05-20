@@ -99,7 +99,7 @@ async function takePageWriteFields(
 const pagesTreeCmd: CliCommand = {
   path: ['pages', 'tree'],
   toolName: 'wiki_pages_tree',
-  help: 'List a flat slice of the page tree under a parent node.',
+  help: 'List the page tree under a parent (use --depth to recurse).',
   parseArgs: ({ flags, positionals }) => {
     if (positionals.length > 0) {
       throw new CliUsageError(
@@ -109,6 +109,7 @@ const pagesTreeCmd: CliCommand = {
     const parent = takeOptionalInt(flags, 'parent');
     const mode = takeOptionalString(flags, 'mode');
     const locale = takeOptionalString(flags, 'locale');
+    const depth = takeOptionalInt(flags, 'depth');
     rejectUnknownFlags(flags);
     const input: Record<string, unknown> = {};
     if (parent !== undefined) input.parent = parent;
@@ -121,24 +122,62 @@ const pagesTreeCmd: CliCommand = {
       input.mode = mode;
     }
     if (locale !== undefined) input.locale = locale;
+    if (depth !== undefined) {
+      if (depth < 1) {
+        throw new CliUsageError(`--depth must be ≥ 1 (got ${depth.toString()})`);
+      }
+      input.depth = depth;
+    }
     return input;
   },
-  formatHuman: (data) => {
-    const tree = (data as { tree?: Array<Record<string, unknown>> }).tree ?? [];
-    if (tree.length === 0) return '(empty)';
-    const out: string[] = [];
-    for (const node of tree) {
-      const depth = Number(node.depth ?? 0);
-      const prefix = '  '.repeat(Math.max(0, depth - 1));
-      const isFolder = node.isFolder === true ? '/' : '';
-      const id = formatScalar(node.id);
-      const title = formatScalar(node.title);
-      const path = formatScalar(node.path);
-      out.push(`${prefix}- [${id}] ${title}${isFolder}  (${path})`);
-    }
-    return out.join('\n');
-  },
+  formatHuman: formatPagesTree,
 };
+
+// Render the flat (DFS-ordered) tree from `wiki_pages_tree` as a classic
+// `tree(1)`-style indented hierarchy using box-drawing characters. Works
+// for any depth: items are grouped by their `parent`, then walked
+// recursively from the root parent that all the shallowest items share.
+// (Wiki.js's `depth` is absolute, so the smallest-depth entries are the
+// top-level ones for this query.)
+function formatPagesTree(data: unknown): string {
+  const tree = (data as { tree?: Array<Record<string, unknown>> }).tree ?? [];
+  if (tree.length === 0) return '(empty)';
+
+  const childrenByParent = new Map<number, Array<Record<string, unknown>>>();
+  for (const item of tree) {
+    const pid = Number(item.parent ?? 0);
+    const arr = childrenByParent.get(pid) ?? [];
+    arr.push(item);
+    childrenByParent.set(pid, arr);
+  }
+
+  const depths = tree.map((t) => Number(t.depth ?? 0));
+  const minDepth = Math.min(...depths);
+  const tops = tree.filter((t) => Number(t.depth ?? 0) === minDepth);
+  // Items at the same min-depth all share the same parent (we only recurse
+  // into entries beneath them). Reading the first top-level item gives us
+  // that root parent without having to thread the original request input
+  // through to the formatter.
+  const rootParent = Number(tops[0]?.parent ?? 0);
+
+  const lines: string[] = [];
+  const walk = (parentId: number, prefix: string): void => {
+    const kids = childrenByParent.get(parentId) ?? [];
+    kids.forEach((kid, idx) => {
+      const isLast = idx === kids.length - 1;
+      const connector = isLast ? '└── ' : '├── ';
+      const folderMark = kid.isFolder === true ? '/' : '';
+      const id = formatScalar(kid.id);
+      const title = formatScalar(kid.title);
+      const path = formatScalar(kid.path);
+      lines.push(`${prefix}${connector}[${id}] ${title}${folderMark}  (${path})`);
+      const nextPrefix = prefix + (isLast ? '    ' : '│   ');
+      walk(Number(kid.id), nextPrefix);
+    });
+  };
+  walk(rootParent, '');
+  return lines.length > 0 ? lines.join('\n') : '(empty)';
+}
 
 // ---------- page get ----------
 

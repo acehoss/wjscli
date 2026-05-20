@@ -40,11 +40,21 @@ export type ReplyOpts = {
   newJwt?: string;
 };
 
+export type RequestDispatcher = (
+  req: MockRequest,
+) => ResponseScript | null;
+
 export type MockGraphQLServer = {
   url: string;
   lastRequest: () => MockRequest | null;
   requestCount: () => number;
   setNext: (script: ResponseScript) => void;
+  // Per-request dispatcher. If set and it returns non-null for a given
+  // request, the mock uses that ResponseScript instead of the one set by
+  // setNext. Used by tests that need to respond differently to multiple
+  // calls in a single test (e.g. recursive `wiki_pages_tree` fetches that
+  // fan out parallel sub-queries with different `parent` variables).
+  setDispatcher: (fn: RequestDispatcher | null) => void;
   close: () => Promise<void>;
   // Typed reply helpers (5d). See ReplyOpts.
   replyToTreeQuery: (tree: PageTreeItem[], opts?: ReplyOpts) => void;
@@ -94,6 +104,7 @@ export async function startMockGraphQLServer(
   initial: ResponseScript = {},
 ): Promise<MockGraphQLServer> {
   let script: ResponseScript = mergeScript(DEFAULT_SCRIPT, initial);
+  let dispatcher: RequestDispatcher | null = null;
   let last: MockRequest | null = null;
   let count = 0;
 
@@ -123,7 +134,16 @@ export async function startMockGraphQLServer(
       }
       count += 1;
 
-      const status = script.status ?? 200;
+      // If a dispatcher is installed and produces a script for this
+      // request, prefer it over the static `script`. This lets a single
+      // test answer multiple queries with different payloads.
+      const effective: ResponseScript = (() => {
+        if (dispatcher === null) return script;
+        const out = dispatcher(last as MockRequest);
+        return out === null ? script : mergeScript(DEFAULT_SCRIPT, out);
+      })();
+
+      const status = effective.status ?? 200;
 
       // Mirror Wiki.js: new-jwt only on 2xx responses, only when the client
       // sent Content-Type EXACTLY "application/json". The real server uses
@@ -135,24 +155,24 @@ export async function startMockGraphQLServer(
       const eligibleForRefresh = status >= 200 && status < 300 && reqIsJson;
       if (
         eligibleForRefresh &&
-        script.newJwt !== null &&
-        script.newJwt !== undefined
+        effective.newJwt !== null &&
+        effective.newJwt !== undefined
       ) {
-        res.setHeader('new-jwt', script.newJwt);
+        res.setHeader('new-jwt', effective.newJwt);
       }
 
       if (status < 200 || status >= 300) {
         res.statusCode = status;
         res.setHeader('Content-Type', 'text/plain');
-        res.end(script.body ?? '');
+        res.end(effective.body ?? '');
         return;
       }
 
       const payload: Record<string, unknown> = {};
-      if (script.errors !== undefined) {
-        payload.errors = script.errors;
+      if (effective.errors !== undefined) {
+        payload.errors = effective.errors;
       } else {
-        payload.data = script.data ?? null;
+        payload.data = effective.data ?? null;
       }
       res.statusCode = status;
       res.setHeader('Content-Type', 'application/json');
@@ -189,6 +209,9 @@ export async function startMockGraphQLServer(
     // `newJwt: null` keeps the no-refresh default rather than picking up
     // the prior script's value).
     setNext: setNextRaw,
+    setDispatcher: (fn) => {
+      dispatcher = fn;
+    },
     replyToTreeQuery: (tree, opts) => {
       setNextRaw(withOpts({ pages: { tree } }, opts));
     },

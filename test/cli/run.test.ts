@@ -128,7 +128,7 @@ describe('runCli — tags list (happy path)', () => {
 describe('runCli — pages tree', () => {
   beforeEach(seedConfig);
 
-  it('renders a tree with an indented prefix per depth', async () => {
+  it('renders a single-level tree with box-drawing connectors', async () => {
     mock.replyToTreeQuery([
       {
         id: 1,
@@ -144,25 +144,124 @@ describe('runCli — pages tree', () => {
       },
       {
         id: 2,
-        path: 'home/child',
-        depth: 2,
-        title: 'Child',
+        path: 'about',
+        depth: 1,
+        title: 'About',
         isPrivate: false,
         isFolder: false,
         privateNS: null,
-        parent: 1,
+        parent: 0,
         pageId: 2,
         locale: 'en',
       },
     ]);
     expect(await runCli(mock.url, ['pages', 'tree'])).toBe(0);
-    expect(stdoutText()).toMatch(/- \[1\] Home/);
-    expect(stdoutText()).toMatch(/  - \[2\] Child/);
+    const out = stdoutText();
+    // First sibling gets ├──; last gets └──.
+    expect(out).toMatch(/^├── \[1\] Home/m);
+    expect(out).toMatch(/^└── \[2\] About/m);
+  });
+
+  it('with --depth recurses and indents children under their parent', async () => {
+    mock.setDispatcher((req) => {
+      const variables = (req.parsed?.variables ?? {}) as { parent?: number };
+      const parent = variables.parent ?? -1;
+      if (parent === 0) {
+        return {
+          data: {
+            pages: {
+              tree: [
+                {
+                  id: 1,
+                  path: 'docs',
+                  depth: 1,
+                  title: 'Docs',
+                  isPrivate: false,
+                  isFolder: true,
+                  privateNS: null,
+                  parent: 0,
+                  pageId: null,
+                  locale: 'en',
+                },
+                {
+                  id: 2,
+                  path: 'about',
+                  depth: 1,
+                  title: 'About',
+                  isPrivate: false,
+                  isFolder: false,
+                  privateNS: null,
+                  parent: 0,
+                  pageId: 2,
+                  locale: 'en',
+                },
+              ],
+            },
+          },
+        };
+      }
+      if (parent === 1) {
+        return {
+          data: {
+            pages: {
+              tree: [
+                {
+                  id: 11,
+                  path: 'docs/setup',
+                  depth: 2,
+                  title: 'Setup',
+                  isPrivate: false,
+                  isFolder: false,
+                  privateNS: null,
+                  parent: 1,
+                  pageId: 11,
+                  locale: 'en',
+                },
+                {
+                  id: 12,
+                  path: 'docs/api',
+                  depth: 2,
+                  title: 'API',
+                  isPrivate: false,
+                  isFolder: false,
+                  privateNS: null,
+                  parent: 1,
+                  pageId: 12,
+                  locale: 'en',
+                },
+              ],
+            },
+          },
+        };
+      }
+      return { data: { pages: { tree: [] } } };
+    });
+    expect(await runCli(mock.url, ['pages', 'tree', '--depth', '2'])).toBe(0);
+    const out = stdoutText();
+    // Docs folder gets ├── (first of two top-level) and trailing slash for folder.
+    expect(out).toMatch(/^├── \[1\] Docs\//m);
+    // Children of Docs are nested under it with │   prefix because Docs is
+    // not the last top-level sibling.
+    expect(out).toMatch(/^│   ├── \[11\] Setup/m);
+    expect(out).toMatch(/^│   └── \[12\] API/m);
+    // About is the last top-level sibling → └──.
+    expect(out).toMatch(/^└── \[2\] About/m);
+  });
+
+  it('renders (empty) when the tree is empty', async () => {
+    mock.replyToTreeQuery([]);
+    expect(await runCli(mock.url, ['pages', 'tree'])).toBe(0);
+    expect(stdoutText()).toContain('(empty)');
   });
 
   it('rejects an invalid --mode', async () => {
     expect(await runCli(mock.url, ['pages', 'tree', '--mode', 'BOGUS'])).toBe(2);
     expect(stderrText()).toContain('--mode must be');
+  });
+
+  it('rejects --depth 0', async () => {
+    expect(await runCli(mock.url, ['pages', 'tree', '--depth', '0'])).toBe(2);
+    expect(stderrText()).toContain('--depth must be');
   });
 });
 
