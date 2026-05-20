@@ -89,7 +89,8 @@ For `page get`, `page update`, and `page history`, the positional `<id-or-path>`
 ## CLI surface
 
 ```text
-wjscli <base-url> validate <jwt> [-t]     Validate JWT, write config
+wjscli <base-url> validate [<jwt>] [-t]   Validate / refresh JWT
+                                          omit <jwt> to use the cached one
                                           -t: stay running, keep token refreshed
 wjscli <base-url> mcp                     Start MCP stdio server
 
@@ -193,6 +194,8 @@ Tags are repeatable and comma-splittable: `--tag a --tag b` or `--tag a,b` (both
 ### Daemon mode (`validate -t`)
 
 `wjscli <url> validate <jwt> -t` does the same one-shot probe as `validate`, writes the config, and then **keeps running** — polling Wiki.js's lightweight `users.profile` query every five minutes to give the server a chance to emit a `new-jwt` refresh header. Any refresh is persisted to the config file atomically. This keeps the stored JWT alive across idle stretches when no MCP or CLI calls are happening.
+
+You can also run `wjscli <url> validate -t` (no JWT) to start the daemon against the cached token — handy when you just want to keep the wheels turning without re-pasting a JWT from your browser.
 
 The daemon exits cleanly on SIGINT/SIGTERM. It also exits (non-zero) if the JWT is rejected — at that point only a fresh JWT can recover.
 

@@ -39,8 +39,13 @@ Top-level argv dispatch in `src/index.ts`. As an ergonomic touch, if the user pa
 ### `validate` subcommand
 
 ```text
-wjscli <base-url> validate <jwt> [-t]
+wjscli <base-url> validate [<jwt>] [-t]
 ```
+
+The JWT positional is **optional**:
+
+- With `<jwt>` — first-run / re-auth flow. Probe through an in-memory `TokenStore`, capture any `new-jwt` refresh, then write a fresh config file. This replaces whatever JWT was cached on disk.
+- Without `<jwt>` — refresh-the-cache flow. Load the persistent `TokenStore` from disk (errors with a first-run hint if no config exists), probe through it, and let the store's `new-jwt` capture + debounced atomic write persist any refresh. Useful for "tickle the wiki to keep my token alive" without going back to the browser for a fresh JWT. Combine with `-t` to start the refresh daemon against the cached token in a single invocation.
 
 - Validates the JWT by making `query { users { profile { id email name } } }` against `<base-url>/graphql`. This is the only user-query field on Wiki.js v2 without an `@auth` schema directive whose resolver still rejects guests, so any authenticated user can call it regardless of permissions. Source: `repos/wiki/server/graph/resolvers/user.js`.
 - Captures the `new-jwt` header from the response (this is the refreshed token).

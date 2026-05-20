@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { runValidate } from '../src/validate.js';
-import { configPathForBaseUrl, readConfig } from '../src/config.js';
+import { configPathForBaseUrl, readConfig, writeConfig } from '../src/config.js';
 import {
   startMockGraphQLServer,
   type MockGraphQLServer,
@@ -79,8 +79,13 @@ describe('runValidate — help flag', () => {
 });
 
 describe('runValidate — usage errors', () => {
-  it('returns 2 with no args', async () => {
-    expect(await runValidate(mock.url, [])).toBe(2);
+  it('no JWT + no cached config → exit 1 with first-run hint', async () => {
+    // The no-args invocation tries to use the cached token; with no
+    // cached config we exit 1 (not 2) and point the user at the
+    // first-run flow.
+    const code = await runValidate(mock.url, []);
+    expect(code).toBe(1);
+    expect(stderrText()).toContain('Supply a JWT');
   });
 
   it('returns 2 with two positional args (JWT only expected)', async () => {
@@ -168,6 +173,68 @@ describe('runValidate — happy path', () => {
   it('does not write the supplied JWT to stderr (never log JWT)', async () => {
     await runValidate(mock.url, [validJwt]);
     expect(stderrText()).not.toContain(validJwt);
+  });
+});
+
+describe('runValidate — cached (no JWT supplied)', () => {
+  // Seed a cached config before each test so the no-JWT path has
+  // something to load.
+  async function seedCachedConfig(jwt: string = validJwt): Promise<void> {
+    await writeConfig({
+      baseUrl: mock.url,
+      jwt,
+      refreshedAt: '2026-05-19T00:00:00.000Z',
+    });
+  }
+
+  it('probes using the cached JWT and exits 0', async () => {
+    await seedCachedConfig();
+    const code = await runValidate(mock.url, []);
+    expect(code).toBe(0);
+    // The probe must have been authenticated with the CACHED jwt, not
+    // some other value.
+    expect(mock.lastRequest()?.authorization).toBe(`Bearer ${validJwt}`);
+    expect(stderrText()).toContain('Authenticated as');
+  });
+
+  it('reports "still valid" when the server did not send new-jwt', async () => {
+    await seedCachedConfig();
+    await runValidate(mock.url, []);
+    expect(stderrText()).toContain('still valid');
+  });
+
+  it('reports "refreshed" when the server sent a new-jwt', async () => {
+    await seedCachedConfig();
+    const fresh =
+      'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJyZWZyZXNoZWQifQ.refreshedsignature1234';
+    mock.setNext({ newJwt: fresh });
+    await runValidate(mock.url, []);
+    expect(stderrText()).toContain('refreshed');
+    const cfg = await readConfig(mock.url);
+    expect(cfg?.jwt).toMatch(/refreshed/);
+  });
+
+  it('-t with no JWT still invokes the daemon', async () => {
+    await seedCachedConfig();
+    let daemonCalls = 0;
+    const code = await runValidate(mock.url, ['-t'], {
+      runDaemon: async () => {
+        daemonCalls += 1;
+        return 0;
+      },
+    });
+    expect(code).toBe(0);
+    expect(daemonCalls).toBe(1);
+  });
+
+  it('propagates probe failure (auth-expired) as exit 1', async () => {
+    await seedCachedConfig();
+    mock.setNext({
+      errors: [{ message: 'You must be authenticated to access this resource.' }],
+    });
+    const code = await runValidate(mock.url, []);
+    expect(code).toBe(1);
+    expect(stderrText()).toContain('JWT rejected by server');
   });
 });
 

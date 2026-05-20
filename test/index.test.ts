@@ -87,10 +87,11 @@ describe('main — argv routing', () => {
     expect(await main(argv('not a url', 'validate', 'a.b.c'))).toBe(2);
   });
 
-  it('<url> validate with no JWT routes through and exits 2', async () => {
-    // Proves the validate subcommand is wired up even when no positional
-    // args follow. runValidate handles the usage error.
-    expect(await main(argv('https://wiki.example.com', 'validate'))).toBe(2);
+  it('<url> validate with no JWT and no cached config routes through and exits 1', async () => {
+    // No JWT now means "use cached token" rather than usage error. With
+    // no cached config under WJSCLI_CONFIG_DIR (each test gets a fresh
+    // tmpdir), runValidate exits 1 with the first-run hint.
+    expect(await main(argv('https://wiki.example.com', 'validate'))).toBe(1);
   });
 
   it('routes <url> mcp to runServer (missing config → exit 1)', async () => {

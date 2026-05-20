@@ -8,6 +8,7 @@ import {
   AuthExpiredError,
   GraphQLError,
   HttpError,
+  MissingConfigError,
   NetworkError,
 } from './util/errors.js';
 import { TokenStore } from './util/token-store.js';
@@ -35,18 +36,25 @@ export type RunValidateDeps = {
 
 export type ParsedValidateArgs = {
   daemon: boolean;
-  jwt: string;
+  // Optional: when absent, validate uses the cached JWT from disk
+  // (TokenStore.loadForBaseUrl). When supplied, it probes with the new
+  // JWT and overwrites the config — the first-run flow.
+  jwt?: string;
 };
 
 const HELP_TEXT = [
-  'wjscli <base-url> validate <jwt> [-t]',
+  'wjscli <base-url> validate [<jwt>] [-t]',
   '',
-  '  Validate a JWT against a Wiki.js v2 instance and write a per-host',
-  '  config file that `wjscli <url> mcp` and the CLI subcommands use.',
+  '  Validate the cached JWT (or a freshly-supplied one) against the Wiki.js',
+  '  instance at <base-url> and persist any new-jwt refresh the server sends',
+  '  back. Without <jwt>, the cached token under .config/wjscli/<host>.json',
+  '  is used; this is the no-friction "tickle the wiki to keep my token',
+  '  alive" path. With <jwt>, the supplied token replaces whatever was on',
+  "  disk — that's the first-run / re-auth flow.",
   '',
   'Arguments:',
   '  <base-url>            Wiki.js base URL (e.g. https://wiki.example.com)',
-  '  <jwt>                 JWT copied from the `jwt` cookie of an',
+  '  <jwt>                 Optional. JWT copied from the `jwt` cookie of an',
   '                        authenticated browser session. In DevTools:',
   "                          copy(document.cookie.split('; ')",
   "                            .find(c=>c.startsWith('jwt=')).slice(4))",
@@ -58,8 +66,10 @@ const HELP_TEXT = [
   '  -h, --help            Show this help',
   '',
   'Examples:',
-  '  wjscli https://wiki.example.com validate eyJ...sig',
-  '  wjscli https://wiki.example.com validate eyJ...sig -t',
+  '  wjscli https://wiki.example.com validate                  # use cached JWT',
+  '  wjscli https://wiki.example.com validate -t               # cached + daemon',
+  '  wjscli https://wiki.example.com validate eyJ...sig        # first-run / re-auth',
+  '  wjscli https://wiki.example.com validate eyJ...sig -t     # re-auth + daemon',
   '',
 ].join('\n');
 
@@ -69,7 +79,8 @@ function usage(): void {
 
 // Parse argv for the validate subcommand (URL has already been consumed
 // upstream in src/index.ts). Accepts `-t` / `--token-refresh` anywhere among
-// the args, before or after the JWT.
+// the args, before or after the JWT. The JWT positional is optional —
+// omit it to validate / refresh the JWT cached on disk.
 function parseArgs(args: string[]): ParsedValidateArgs | null {
   let daemon = false;
   const positional: string[] = [];
@@ -80,9 +91,8 @@ function parseArgs(args: string[]): ParsedValidateArgs | null {
       positional.push(a);
     }
   }
-  if (positional.length !== 1) return null;
-  const [jwt] = positional;
-  return { daemon, jwt };
+  if (positional.length > 1) return null;
+  return { daemon, jwt: positional[0] };
 }
 
 export async function runValidate(
@@ -113,7 +123,31 @@ export async function runValidate(
     return 2;
   }
 
-  if (!JWT_SHAPE.test(parsed.jwt)) {
+  // Two branches: supplied JWT (first-run / re-auth) vs cached JWT
+  // (no-arg validate, used to give the token a chance to refresh).
+  const exitCode =
+    parsed.jwt !== undefined
+      ? await validateWithSuppliedJwt(canonicalBaseUrl, parsed.jwt, deps)
+      : await validateFromCache(canonicalBaseUrl, deps);
+  if (exitCode !== 0) return exitCode;
+
+  if (!parsed.daemon) {
+    return 0;
+  }
+
+  const daemonRunner = deps.runDaemon ?? runRefreshDaemon;
+  return daemonRunner(canonicalBaseUrl, deps.fetchImpl);
+}
+
+// First-run / re-auth path: probe with the supplied JWT through an in-memory
+// store, then write a fresh config file. Captures any new-jwt refresh the
+// server sent on the probe response.
+async function validateWithSuppliedJwt(
+  canonicalBaseUrl: string,
+  jwt: string,
+  deps: RunValidateDeps,
+): Promise<number> {
+  if (!JWT_SHAPE.test(jwt)) {
     process.stderr.write(
       'wjscli: that does not look like a JWT (expected three dot-separated base64url segments).\n' +
         '  copy the value from the `jwt` cookie of an authenticated browser session.\n',
@@ -123,7 +157,7 @@ export async function runValidate(
 
   process.stderr.write(`Connecting to ${canonicalBaseUrl}…\n`);
 
-  const probeStore = TokenStore.inMemory(canonicalBaseUrl, parsed.jwt);
+  const probeStore = TokenStore.inMemory(canonicalBaseUrl, jwt);
   const probeClient = new WikiClient({
     tokenStore: probeStore,
     ...(deps.fetchImpl !== undefined ? { fetchImpl: deps.fetchImpl } : {}),
@@ -136,31 +170,9 @@ export async function runValidate(
     return reportProbeError(err);
   }
 
-  // Defensively read profile fields — Wiki.js could (in principle) return
-  // null at any layer. Treat any access failure or shape mismatch as
-  // "unexpected response" and refuse to write a config.
-  const p = (profile as { users?: { profile?: unknown } } | null)?.users?.profile;
-  if (
-    p === undefined ||
-    p === null ||
-    typeof p !== 'object' ||
-    typeof (p as { id?: unknown }).id !== 'number' ||
-    typeof (p as { email?: unknown }).email !== 'string' ||
-    typeof (p as { name?: unknown }).name !== 'string'
-  ) {
-    process.stderr.write(
-      'wjscli: server returned an unexpected profile shape; refusing to write config.\n',
-    );
-    return 1;
-  }
-  const id = (p as { id: number }).id;
-  const email = (p as { email: string }).email;
-  const name = (p as { name: string }).name;
+  const id = readProbeProfile(profile);
+  if (id === null) return 1;
 
-  process.stderr.write(`✓ Authenticated as ${name} <${email}> (id=${id})\n`);
-
-  // probeStore.getToken() reflects any new-jwt refresh the server included on
-  // the probe response. That's the value we want to persist.
   const cfg: ConfigFile = {
     baseUrl: canonicalBaseUrl,
     jwt: probeStore.getToken(),
@@ -179,13 +191,99 @@ export async function runValidate(
   process.stderr.write(
     `✓ Config written to ${configPathForBaseUrl(canonicalBaseUrl)}\n`,
   );
+  return 0;
+}
 
-  if (!parsed.daemon) {
-    return 0;
+// No-JWT path: load the persistent TokenStore from disk and probe through it.
+// Any new-jwt header lands in the store via WikiClient → store.update(...),
+// which schedules a debounced atomic disk write; close() flushes it before
+// we return. If no config exists, hint the user to supply a JWT.
+async function validateFromCache(
+  canonicalBaseUrl: string,
+  deps: RunValidateDeps,
+): Promise<number> {
+  let store: TokenStore;
+  try {
+    store = await TokenStore.loadForBaseUrl(canonicalBaseUrl);
+  } catch (err) {
+    if (err instanceof MissingConfigError) {
+      process.stderr.write(
+        `wjscli: ${err.message}\n` +
+          '  Supply a JWT positionally for the first-run flow:\n' +
+          `    wjscli ${canonicalBaseUrl} validate <jwt>\n`,
+      );
+      return 1;
+    }
+    process.stderr.write(
+      `wjscli: failed to load cached JWT: ${err instanceof Error ? err.message : String(err)}\n`,
+    );
+    return 1;
   }
 
-  const daemonRunner = deps.runDaemon ?? runRefreshDaemon;
-  return daemonRunner(canonicalBaseUrl, deps.fetchImpl);
+  process.stderr.write(`Validating cached token against ${canonicalBaseUrl}…\n`);
+
+  const client = new WikiClient({
+    tokenStore: store,
+    ...(deps.fetchImpl !== undefined ? { fetchImpl: deps.fetchImpl } : {}),
+  });
+  const tokenBefore = store.getToken();
+
+  let profile: ProbeResponse;
+  try {
+    profile = await client.gql<ProbeResponse>(PROBE_QUERY);
+  } catch (err) {
+    await store.close();
+    return reportProbeError(err);
+  }
+
+  const id = readProbeProfile(profile);
+  if (id === null) {
+    await store.close();
+    return 1;
+  }
+
+  // Capture whether a new-jwt was received during the probe. The store has
+  // already persisted it via its debounced write; we just want to surface
+  // the fact in the user-visible output.
+  const tokenAfter = store.getToken();
+  const refreshed = tokenAfter !== tokenBefore;
+
+  // Flush + close before returning. If daemon mode is also requested, the
+  // daemon will load its own fresh store — slightly wasteful but keeps the
+  // lifetimes simple (the daemon's signal handlers etc. own a single store).
+  await store.close();
+
+  if (refreshed) {
+    process.stderr.write('✓ Cached token refreshed (new-jwt received).\n');
+  } else {
+    process.stderr.write('✓ Cached token still valid (no refresh needed).\n');
+  }
+  return 0;
+}
+
+// Parse + validate the users.profile response. Returns the user id on
+// success; logs and returns null on shape mismatch. Shared by both the
+// supplied-JWT and cached-JWT branches.
+function readProbeProfile(profile: ProbeResponse): number | null {
+  const p = (profile as { users?: { profile?: unknown } } | null)?.users?.profile;
+  if (
+    p === undefined ||
+    p === null ||
+    typeof p !== 'object' ||
+    typeof (p as { id?: unknown }).id !== 'number' ||
+    typeof (p as { email?: unknown }).email !== 'string' ||
+    typeof (p as { name?: unknown }).name !== 'string'
+  ) {
+    process.stderr.write(
+      'wjscli: server returned an unexpected profile shape; refusing to proceed.\n',
+    );
+    return null;
+  }
+  const id = (p as { id: number }).id;
+  const email = (p as { email: string }).email;
+  const name = (p as { name: string }).name;
+  process.stderr.write(`✓ Authenticated as ${name} <${email}> (id=${id.toString()})\n`);
+  return id;
 }
 
 function reportProbeError(err: unknown): number {
