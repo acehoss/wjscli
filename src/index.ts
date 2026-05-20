@@ -102,6 +102,7 @@ function usageText(): string {
     '  wjscli --help                              Print this help',
     '',
     'Add --json to any CLI subcommand for raw JSON output.',
+    'For per-subcommand help: wjscli <base-url> <subcommand> --help',
     'See SPEC.md for the full design.',
     '',
   ].join('\n');

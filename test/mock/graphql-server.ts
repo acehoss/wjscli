@@ -213,7 +213,23 @@ export async function startMockGraphQLServer(
       dispatcher = fn;
     },
     replyToTreeQuery: (tree, opts) => {
-      setNextRaw(withOpts({ pages: { tree } }, opts));
+      // The tool now defaults to depth=20 — replyToTreeQuery used to set a
+      // static response which would loop on the same payload during a
+      // recursive walk. Install a dispatcher instead: answer the tree-query
+      // whose `parent` matches the topmost item's parent with the given
+      // payload, and answer any other tree query (i.e. the recursive
+      // children-of-X calls) with an empty tree. Non-tree queries fall
+      // through (`return null`) so other helpers still work.
+      const topParent =
+        tree.length > 0 ? Number((tree[0] as { parent?: number }).parent ?? 0) : 0;
+      dispatcher = (req) => {
+        const vars = (req.parsed?.variables ?? {}) as { parent?: number };
+        if (vars.parent === undefined) return null;
+        if (vars.parent === topParent) {
+          return withOpts({ pages: { tree } }, opts);
+        }
+        return { data: { pages: { tree: [] } } };
+      };
     },
     replyToSinglePage: (page, opts) => {
       setNextRaw(withOpts({ pages: { single: page } }, opts));

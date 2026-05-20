@@ -95,13 +95,43 @@ describe('wiki_pages_tree', () => {
       expect(err).toMatchObject({ code: ErrorCode.InvalidParams });
     });
 
-    it('depth=1 issues exactly one query (backward compat)', async () => {
+    it('depth=1 issues exactly one query', async () => {
       const { mock, client } = ctx();
       mock.replyToTreeQuery([
         treeItem({ id: 1, parent: 0, depth: 1, isFolder: true, title: 'Docs' }),
       ]);
       await dispatchTool('wiki_pages_tree', { depth: 1 }, client);
       expect(mock.requestCount()).toBe(1);
+    });
+
+    it('default depth recurses past one level', async () => {
+      const { mock, client } = ctx();
+      mock.setDispatcher((req) => {
+        const variables = (req.parsed?.variables ?? {}) as { parent?: number };
+        const parent = variables.parent ?? -1;
+        if (parent === 0) {
+          return {
+            data: {
+              pages: {
+                tree: [treeItem({ id: 1, parent: 0, depth: 1, isFolder: true })],
+              },
+            },
+          };
+        }
+        if (parent === 1) {
+          return {
+            data: { pages: { tree: [treeItem({ id: 2, parent: 1, depth: 2 })] } },
+          };
+        }
+        return { data: { pages: { tree: [] } } };
+      });
+      // No explicit depth → tool should still recurse (default is now 20).
+      const result = await dispatchTool('wiki_pages_tree', {}, client);
+      const parsed = JSON.parse(result.content[0]?.text ?? '{}') as {
+        tree: Array<{ id: number }>;
+      };
+      expect(parsed.tree.map((n) => n.id)).toEqual([1, 2]);
+      expect(mock.requestCount()).toBeGreaterThan(1);
     });
 
     it('depth=2 fetches each top-level node\'s subtree in a follow-up query', async () => {

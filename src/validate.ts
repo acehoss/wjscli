@@ -38,13 +38,33 @@ export type ParsedValidateArgs = {
   jwt: string;
 };
 
+const HELP_TEXT = [
+  'wjscli <base-url> validate <jwt> [-t]',
+  '',
+  '  Validate a JWT against a Wiki.js v2 instance and write a per-host',
+  '  config file that `wjscli <url> mcp` and the CLI subcommands use.',
+  '',
+  'Arguments:',
+  '  <base-url>            Wiki.js base URL (e.g. https://wiki.example.com)',
+  '  <jwt>                 JWT copied from the `jwt` cookie of an',
+  '                        authenticated browser session. In DevTools:',
+  "                          copy(document.cookie.split('; ')",
+  "                            .find(c=>c.startsWith('jwt=')).slice(4))",
+  '',
+  'Options:',
+  '  -t, --token-refresh   Stay running after the probe; poll users.profile',
+  '                        every 5 minutes to keep the stored JWT refreshed',
+  '                        across idle stretches. Exits on SIGINT/SIGTERM.',
+  '  -h, --help            Show this help',
+  '',
+  'Examples:',
+  '  wjscli https://wiki.example.com validate eyJ...sig',
+  '  wjscli https://wiki.example.com validate eyJ...sig -t',
+  '',
+].join('\n');
+
 function usage(): void {
-  process.stderr.write(
-    'usage: wjscli <base-url> validate <jwt> [-t]\n' +
-      '  -t / --token-refresh   stay running and keep the JWT refreshed\n' +
-      '  copy <jwt> from the `jwt` cookie of an authenticated browser session:\n' +
-      "  in DevTools console:  copy(document.cookie.split('; ').find(c=>c.startsWith('jwt=')).slice(4))\n",
-  );
+  process.stderr.write(HELP_TEXT);
 }
 
 // Parse argv for the validate subcommand (URL has already been consumed
@@ -70,6 +90,11 @@ export async function runValidate(
   args: string[],
   deps: RunValidateDeps = {},
 ): Promise<number> {
+  // -h / --help anywhere in args is a user request → stdout, exit 0.
+  if (args.some((a) => a === '-h' || a === '--help')) {
+    process.stdout.write(HELP_TEXT);
+    return 0;
+  }
   const parsed = parseArgs(args);
   if (parsed === null) {
     usage();

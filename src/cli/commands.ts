@@ -26,7 +26,12 @@ export type CliCommand = {
   path: ReadonlyArray<string>;
   // toolName matches the MCP tool registry — TOOL_DEFS in src/tools/index.ts.
   toolName: string;
+  // One-liner shown in the top-level command list.
   help: string;
+  // Multi-line help block printed when the user invokes the command with
+  // `-h` / `--help`. Goes to stdout (user-requested) and should already end
+  // with a trailing newline.
+  usage: string;
   // Sync or async — the dispatcher awaits the result either way. Commands
   // that need to resolve `@-` / `@file` content read paths return a Promise.
   parseArgs: (argv: ParsedArgv) => unknown;
@@ -99,7 +104,29 @@ async function takePageWriteFields(
 const pagesTreeCmd: CliCommand = {
   path: ['pages', 'tree'],
   toolName: 'wiki_pages_tree',
-  help: 'List the page tree under a parent (use --depth to recurse).',
+  help: 'List the page tree under a parent (recursive by default).',
+  usage: [
+    'wjscli <base-url> pages tree [options]',
+    '',
+    '  List the Wiki.js page tree under a parent node. By default the tool',
+    '  recurses 20 levels deep (effectively unlimited for most wikis); each',
+    '  level fans out one GraphQL query per node at the level above.',
+    '  Human-readable output uses tree(1)-style box-drawing connectors.',
+    '',
+    'Options:',
+    '  --parent N      Parent node ID (default 0 = the wiki root)',
+    '  --mode MODE     ALL | PAGES | FOLDERS (default ALL)',
+    '  --locale L      Locale code (default en)',
+    '  --depth N       Levels to recurse, ≥ 1 (default 20)',
+    '  --json          Output raw JSON instead of the tree view',
+    '  -h, --help      Show this help',
+    '',
+    'Examples:',
+    '  wjscli https://wiki.example.com pages tree',
+    '  wjscli https://wiki.example.com pages tree --parent 5 --depth 2',
+    '  wjscli https://wiki.example.com pages tree --mode FOLDERS --json',
+    '',
+  ].join('\n'),
   parseArgs: ({ flags, positionals }) => {
     if (positionals.length > 0) {
       throw new CliUsageError(
@@ -185,6 +212,26 @@ const pageGetCmd: CliCommand = {
   path: ['page', 'get'],
   toolName: 'wiki_page_get',
   help: 'Fetch a single page by --id or by --path.',
+  usage: [
+    'wjscli <base-url> page get { --id N | --path P } [options]',
+    '',
+    '  Fetch a single Wiki.js page by id or by path. Pass exactly one of',
+    '  --id or --path. Some fields (content, editor, author/creator details)',
+    "  require write:pages or manage:system permission server-side; if the",
+    '  user lacks them, Wiki.js returns a GraphQL error.',
+    '',
+    'Options:',
+    '  --id N          Page ID (mutually exclusive with --path)',
+    '  --path P        Page path (mutually exclusive with --id)',
+    '  --locale L      Locale code (used with --path; default en)',
+    '  --json          Output raw JSON instead of human-readable view',
+    '  -h, --help      Show this help',
+    '',
+    'Examples:',
+    '  wjscli https://wiki.example.com page get --id 42',
+    '  wjscli https://wiki.example.com page get --path team/onboarding',
+    '',
+  ].join('\n'),
   parseArgs: ({ flags, positionals }) => {
     if (positionals.length > 0) {
       throw new CliUsageError(
@@ -247,6 +294,34 @@ const pageCreateCmd: CliCommand = {
   path: ['page', 'create'],
   toolName: 'wiki_page_create',
   help: 'Create a new page. Required: --path, --title, --content.',
+  usage: [
+    'wjscli <base-url> page create --path P --title T --content C [options]',
+    '',
+    '  Create a new Wiki.js page. The created page is attributed to the',
+    '  user whose JWT was validated.',
+    '',
+    'Required:',
+    '  --path P        Page path (e.g. "docs/setup")',
+    '  --title T       Page title',
+    '  --content C     Page body. Supports `@-` (read from stdin)',
+    '                  and `@path` (read from file).',
+    '',
+    'Options:',
+    '  --description D Page description. Supports @-/@path. (default "")',
+    '  --editor E      Editor key (default "markdown")',
+    '  --locale L      Locale code (default "en")',
+    '  --tag T         Tag (repeatable; comma-splittable: --tag a,b)',
+    '  --published / --no-published   (default published)',
+    '  --private / --no-private       (default not private)',
+    '  --json          Output raw JSON',
+    '  -h, --help      Show this help',
+    '',
+    'Example:',
+    '  wjscli https://wiki.example.com page create \\',
+    '    --path docs/setup --title "Setup" --content @./setup.md \\',
+    '    --tag docs --tag onboarding',
+    '',
+  ].join('\n'),
   parseArgs: async ({ flags, positionals }) => {
     if (positionals.length > 0) {
       throw new CliUsageError(
@@ -269,6 +344,36 @@ const pageUpdateCmd: CliCommand = {
   path: ['page', 'update'],
   toolName: 'wiki_page_update',
   help: 'Update a page. Requires --id plus at least one mutable field.',
+  usage: [
+    'wjscli <base-url> page update --id N [field...]',
+    '',
+    '  Update an existing Wiki.js page. Only supplied fields are changed;',
+    '  unsupplied fields are preserved (the tool fetch-merge-updates under',
+    '  the hood — one extra GraphQL round-trip per call).',
+    '',
+    'Required:',
+    '  --id N          Page ID',
+    '',
+    'Mutable fields (supply any one or more):',
+    '  --path P',
+    '  --title T',
+    '  --content C     Supports @-/@path',
+    '  --description D Supports @-/@path',
+    '  --editor E',
+    '  --locale L',
+    '  --tag T         Repeatable; comma-splittable',
+    '  --published / --no-published',
+    '  --private / --no-private',
+    '',
+    'Options:',
+    '  --json          Output raw JSON',
+    '  -h, --help      Show this help',
+    '',
+    'Example:',
+    '  wjscli https://wiki.example.com page update --id 42 \\',
+    '    --title "New title" --content @./new-body.md',
+    '',
+  ].join('\n'),
   parseArgs: async ({ flags, positionals }) => {
     if (positionals.length > 0) {
       throw new CliUsageError(
@@ -305,6 +410,25 @@ const pageHistoryCmd: CliCommand = {
   path: ['page', 'history'],
   toolName: 'wiki_page_history',
   help: 'Fetch revision history of a page.',
+  usage: [
+    'wjscli <base-url> page history --id N [options]',
+    '',
+    '  Fetch the revision history of a Wiki.js page. Requires manage:system',
+    '  or read:history permission server-side.',
+    '',
+    'Required:',
+    '  --id N            Page ID',
+    '',
+    'Options:',
+    '  --offset-page N   Page offset for pagination (default 0)',
+    '  --offset-size N   Page size for pagination (Wiki.js default 100)',
+    '  --json            Output raw JSON',
+    '  -h, --help        Show this help',
+    '',
+    'Example:',
+    '  wjscli https://wiki.example.com page history --id 42',
+    '',
+  ].join('\n'),
   parseArgs: ({ flags, positionals }) => {
     if (positionals.length > 0) {
       throw new CliUsageError(
@@ -345,6 +469,26 @@ const searchCmd: CliCommand = {
   path: ['search'],
   toolName: 'wiki_search',
   help: 'Search pages. First positional after the URL is the query.',
+  usage: [
+    'wjscli <base-url> search <query> [options]',
+    '',
+    '  Search Wiki.js pages. Returns { results, suggestions, totalHits }',
+    '  as Wiki.js does — results may be empty with totalHits=0 if no search',
+    "  engine is configured on the server. Results are filtered by the",
+    "  calling user's read:pages permission.",
+    '',
+    'Arguments:',
+    '  <query>         Search query string (positional, after the command)',
+    '',
+    'Options:',
+    '  --locale L      Restrict to a specific locale',
+    '  --json          Output raw JSON',
+    '  -h, --help      Show this help',
+    '',
+    'Example:',
+    '  wjscli https://wiki.example.com search "onboarding"',
+    '',
+  ].join('\n'),
   parseArgs: ({ flags, positionals }) => {
     if (positionals.length === 0) {
       throw new CliUsageError('search requires a query positional argument');
@@ -393,6 +537,20 @@ const tagsListCmd: CliCommand = {
   path: ['tags', 'list'],
   toolName: 'wiki_tags_list',
   help: 'List all tags the user can read.',
+  usage: [
+    'wjscli <base-url> tags list [options]',
+    '',
+    '  List all tags across pages the calling user can read. Filtered',
+    '  server-side by the read:pages permission.',
+    '',
+    'Options:',
+    '  --json          Output raw JSON',
+    '  -h, --help      Show this help',
+    '',
+    'Example:',
+    '  wjscli https://wiki.example.com tags list',
+    '',
+  ].join('\n'),
   parseArgs: ({ flags, positionals }) => {
     if (positionals.length > 0) {
       throw new CliUsageError(

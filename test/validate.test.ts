@@ -48,6 +48,36 @@ afterEach(async () => {
 
 const stderrText = (): string => stderrChunks.join('');
 
+describe('runValidate — help flag', () => {
+  it('-h prints help to stdout and exits 0', async () => {
+    const stdoutChunks: string[] = [];
+    const stdoutSpy = vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => {
+      stdoutChunks.push(typeof chunk === 'string' ? chunk : chunk.toString('utf8'));
+      return true;
+    });
+    try {
+      expect(await runValidate(mock.url, ['-h'])).toBe(0);
+      expect(stdoutChunks.join('')).toMatch(/wjscli <base-url> validate/);
+    } finally {
+      stdoutSpy.mockRestore();
+    }
+  });
+
+  it('--help works at any position', async () => {
+    const stdoutChunks: string[] = [];
+    const stdoutSpy = vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => {
+      stdoutChunks.push(typeof chunk === 'string' ? chunk : chunk.toString('utf8'));
+      return true;
+    });
+    try {
+      expect(await runValidate(mock.url, [validJwt, '--help'])).toBe(0);
+      expect(stdoutChunks.join('')).toMatch(/--token-refresh/);
+    } finally {
+      stdoutSpy.mockRestore();
+    }
+  });
+});
+
 describe('runValidate — usage errors', () => {
   it('returns 2 with no args', async () => {
     expect(await runValidate(mock.url, [])).toBe(2);

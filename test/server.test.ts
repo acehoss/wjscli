@@ -45,6 +45,40 @@ afterEach(async () => {
 
 const stderrText = (): string => stderrChunks.join('');
 
+describe('runServer — help flag', () => {
+  it('-h prints help to stdout and exits 0 without needing config', async () => {
+    const stdoutChunks: string[] = [];
+    const stdoutSpy = vi
+      .spyOn(process.stdout, 'write')
+      .mockImplementation((chunk) => {
+        stdoutChunks.push(typeof chunk === 'string' ? chunk : chunk.toString('utf8'));
+        return true;
+      });
+    try {
+      expect(await runServer(baseUrl, ['-h'])).toBe(0);
+      expect(stdoutChunks.join('')).toMatch(/wjscli <base-url> mcp/);
+    } finally {
+      stdoutSpy.mockRestore();
+    }
+  });
+
+  it('--help works the same way', async () => {
+    const stdoutChunks: string[] = [];
+    const stdoutSpy = vi
+      .spyOn(process.stdout, 'write')
+      .mockImplementation((chunk) => {
+        stdoutChunks.push(typeof chunk === 'string' ? chunk : chunk.toString('utf8'));
+        return true;
+      });
+    try {
+      expect(await runServer(baseUrl, ['--help'])).toBe(0);
+      expect(stdoutChunks.join('')).toMatch(/Model Context Protocol|stdio/);
+    } finally {
+      stdoutSpy.mockRestore();
+    }
+  });
+});
+
 describe('runServer — usage and config errors', () => {
   it('returns 2 with extra args after the URL', async () => {
     expect(await runServer(baseUrl, ['extra'])).toBe(2);

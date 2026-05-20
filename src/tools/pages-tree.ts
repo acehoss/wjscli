@@ -21,12 +21,17 @@ const inputSchema = z.object({
     .min(1)
     .optional()
     .describe(
-      'How many levels below `parent` to recurse. Default 1 (immediate ' +
-        'children only). Each level above 1 fans out one extra GraphQL ' +
-        'query per node at the level above — costs add up fast on deep ' +
-        'wikis.',
+      'How many levels below `parent` to recurse. Default 20 — deep ' +
+        'enough to print the full tree for almost any wiki. Each level ' +
+        'fans out one extra GraphQL query per node at the level above, ' +
+        'so set this lower on very large wikis if cost matters.',
     ),
 });
+
+// Default depth: 20 levels covers any realistic wiki structure without
+// running away, and matches the user expectation of "show the full tree
+// unless I say otherwise".
+const DEFAULT_DEPTH = 20;
 
 // Recursively fetch the page tree under `parentId`. Wiki.js's `pages.tree`
 // resolver only returns immediate children of the given parent, so we have
@@ -75,16 +80,16 @@ export const pagesTreeTool: ToolDef<typeof inputSchema> = {
     'List a slice of the Wiki.js page tree under a parent node. Each entry ' +
     'includes `depth` (absolute from the wiki root) and `parent` so the ' +
     'caller can rebuild the hierarchy. Defaults: parent=0 (root), mode=ALL, ' +
-    'locale=en, depth=1. Pass depth>1 to recurse: each level adds one ' +
-    'GraphQL round-trip per node at the level above. The returned list is ' +
-    'flat but ordered DFS — parent first, then its subtree, then the next ' +
-    'sibling.',
+    'locale=en, depth=20 (deep enough to print the full tree for most ' +
+    'wikis). Each extra level adds one GraphQL round-trip per node at the ' +
+    'level above. The returned list is flat but ordered DFS — parent first, ' +
+    'then its subtree, then the next sibling.',
   inputSchema,
   handler: async (input, client) => {
     const parent = input.parent ?? 0;
     const mode: PageTreeMode = input.mode ?? 'ALL';
     const locale = input.locale ?? 'en';
-    const depth = input.depth ?? 1;
+    const depth = input.depth ?? DEFAULT_DEPTH;
     const tree = await fetchSubtree(client, parent, mode, locale, depth);
     return jsonResult({ tree });
   },

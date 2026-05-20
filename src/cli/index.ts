@@ -44,6 +44,15 @@ export async function runCli(
   }
   const { command, rest: afterCommand } = matched;
 
+  // `-h` / `--help` at any position in the command's args prints that
+  // command's detailed usage to stdout (user-requested → pipeable) and
+  // returns 0. Doing this before readArgv keeps boolean-vs-value flag
+  // disambiguation out of the picture for help.
+  if (afterCommand.some((a) => a === '-h' || a === '--help')) {
+    process.stdout.write(command.usage);
+    return 0;
+  }
+
   // --json is a global flag; consume it before per-command parsing.
   const argv = readArgv(afterCommand);
   const jsonValues = argv.flags.get('json');

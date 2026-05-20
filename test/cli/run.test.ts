@@ -76,6 +76,35 @@ describe('runCli — usage', () => {
   });
 });
 
+describe('runCli — per-command help flag', () => {
+  // Help is a user request → stdout, exit 0. No config required.
+  it('pages tree -h prints command-specific usage', async () => {
+    expect(await runCli(mock.url, ['pages', 'tree', '-h'])).toBe(0);
+    expect(stdoutText()).toContain('wjscli <base-url> pages tree');
+    expect(stdoutText()).toContain('--depth');
+  });
+
+  it('page get --help works without --id or --path', async () => {
+    expect(await runCli(mock.url, ['page', 'get', '--help'])).toBe(0);
+    expect(stdoutText()).toContain('wjscli <base-url> page get');
+    expect(stdoutText()).toContain('mutually exclusive');
+  });
+
+  it('--help interleaved with other args still triggers help (no validation)', async () => {
+    // No config seeded; we'd normally exit 1 on missing config. Help short-
+    // circuits before that path even runs.
+    expect(
+      await runCli(mock.url, ['page', 'update', '--id', '42', '-h']),
+    ).toBe(0);
+    expect(stdoutText()).toContain('wjscli <base-url> page update');
+  });
+
+  it('tags list --help', async () => {
+    expect(await runCli(mock.url, ['tags', 'list', '--help'])).toBe(0);
+    expect(stdoutText()).toContain('wjscli <base-url> tags list');
+  });
+});
+
 describe('runCli — missing config', () => {
   it('exits 1 with a hint to run validate', async () => {
     expect(await runCli(mock.url, ['tags', 'list'])).toBe(1);

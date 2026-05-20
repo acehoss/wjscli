@@ -106,11 +106,19 @@ wjscli --help
 Add `--json` to any CLI subcommand for the raw MCP-equivalent JSON payload. Default output is a small human-readable rendering per command (box-drawing tree for `pages tree`, key/value + content for `page get`, table-ish for `search` and `page history`, etc.). Example:
 
 ```text
-$ wjscli https://wiki.example.com pages tree --depth 2
+$ wjscli https://wiki.example.com pages tree
 ├── [1] Docs/  (docs)
 │   ├── [11] Setup  (docs/setup)
 │   └── [12] API  (docs/api)
 └── [2] About  (about)
+```
+
+`pages tree` recurses 20 levels by default — pass `--depth N` to limit it. Every subcommand accepts `-h` / `--help` for command-specific usage, including options and examples:
+
+```sh
+wjscli https://wiki.example.com pages tree --help
+wjscli https://wiki.example.com page get -h
+wjscli https://wiki.example.com validate --help
 ```
 
 `page create` and `page update` accept `--content -` to read content from stdin or `--content @path/to/file.md` to read from a file. The same `@-` / `@path` indirection works for `--description`.
@@ -157,7 +165,7 @@ After validation and (re)start, your MCP client sees these seven tools:
 
 | Tool | What it does |
 | --- | --- |
-| `wiki_pages_tree` | List a slice of the Wiki.js page tree under a parent node. Each entry includes `depth` (absolute from the wiki root) and `parent` so the caller can rebuild the hierarchy. Defaults: parent=0 (root), mode=ALL, locale=en, depth=1. Pass `depth > 1` to recurse — each extra level adds one GraphQL round-trip per node at the level above. Returned list is flat but ordered DFS (parent, then its subtree). |
+| `wiki_pages_tree` | List a slice of the Wiki.js page tree under a parent node. Each entry includes `depth` (absolute from the wiki root) and `parent` so the caller can rebuild the hierarchy. Defaults: parent=0 (root), mode=ALL, locale=en, depth=20 (deep enough to print the full tree for most wikis). Each extra level adds one GraphQL round-trip per node at the level above. Returned list is flat but ordered DFS (parent, then its subtree). |
 | `wiki_page_get` | Fetch a single Wiki.js page by `id` or by `{path, locale?}` (exactly one — never both, never neither). Returns the full Page record (title, path, content, contentType, tags, isPublished, createdAt, updatedAt, authorName, etc.). |
 | `wiki_page_create` | Create a Wiki.js page. Required: `path`, `title`, `content`. Defaults applied for unspecified fields: description="", editor="markdown", locale="en", tags=[], isPublished=true, isPrivate=false. The created page is attributed to the user whose JWT was validated. |
 | `wiki_page_update` | Update a Wiki.js page. Requires `id` plus at least one field to change. Only supplied fields are sent — omitted fields are left untouched. The update is attributed to the user whose JWT was validated. |

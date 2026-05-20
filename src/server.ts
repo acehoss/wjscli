@@ -15,11 +15,44 @@ export type RunServerDeps = {
   smokeOnly?: boolean;
 };
 
+const MCP_HELP_TEXT = [
+  'wjscli <base-url> mcp',
+  '',
+  '  Start a Model Context Protocol stdio server for a Wiki.js v2 instance.',
+  '  Requires a config file written by `wjscli <base-url> validate <jwt>`.',
+  '',
+  '  The server reads the stored JWT, watches the config file for live',
+  '  updates (e.g. a re-validate from another shell), and writes back any',
+  '  new-jwt refresh headers it receives during tool calls.',
+  '',
+  'Arguments:',
+  '  <base-url>      Wiki.js base URL (must already be validated)',
+  '',
+  'Options:',
+  '  -h, --help      Show this help',
+  '',
+  'Example Claude Desktop config block:',
+  '  {',
+  '    "mcpServers": {',
+  '      "wikijs": {',
+  '        "command": "wjscli",',
+  '        "args": ["https://wiki.example.com", "mcp"]',
+  '      }',
+  '    }',
+  '  }',
+  '',
+].join('\n');
+
 export async function runServer(
   rawBaseUrl: string,
   args: string[] = [],
   deps: RunServerDeps = {},
 ): Promise<number> {
+  // -h / --help anywhere in args → stdout, exit 0.
+  if (args.some((a) => a === '-h' || a === '--help')) {
+    process.stdout.write(MCP_HELP_TEXT);
+    return 0;
+  }
   if (args.length !== 0) {
     process.stderr.write(
       `usage: wjscli <base-url> mcp   (no additional args; got: ${args.join(' ')})\n`,
