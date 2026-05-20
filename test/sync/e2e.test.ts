@@ -416,6 +416,44 @@ describe('sync pull', () => {
     await runClone({ baseUrl: mock.url, targetDir: cloneDir });
   });
 
+  it('does not falsely report "gone on server" when nothing changed', async () => {
+    // Regression: the first cut compared the index's page ids against the
+    // pageTree row ids in the remote tree (different id namespaces), so
+    // every page in the index looked deleted and got re-pushed into the
+    // new entries list, doubling the index. With the fix, a pull right
+    // after clone is a true no-op.
+    stdoutChunks.length = 0;
+    const code = await runPull({ dir: cloneDir, force: false });
+    expect(code).toBe(0);
+    expect(stdoutText()).not.toContain('gone on server');
+
+    const repo = await loadRepo(cloneDir);
+    const idx = await readIndex(repo);
+    const ids = idx.entries.map((e) => e.id);
+    // No duplicates introduced by the pull.
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it('heals a previously-duplicated index in a single pull', async () => {
+    // Simulate the buggy state left behind by an old pull: index entries
+    // appear twice. With the dedupe pass the next pull cleans it up.
+    const repo = await loadRepo(cloneDir);
+    const idx = await readIndex(repo);
+    const doubled = { version: 1 as const, entries: [...idx.entries, ...idx.entries] };
+    await (await import('node:fs')).promises.writeFile(
+      repo.indexPath,
+      `${JSON.stringify(doubled, null, 2)}\n`,
+      'utf8',
+    );
+
+    const code = await runPull({ dir: cloneDir, force: false });
+    expect(code).toBe(0);
+
+    const healed = await readIndex(repo);
+    const ids = healed.entries.map((e) => e.id);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
   it('picks up a remote update on an untouched file', async () => {
     seedWiki([
       makePage({

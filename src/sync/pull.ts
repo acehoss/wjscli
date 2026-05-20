@@ -165,7 +165,15 @@ export async function runPull(opts: RunPullOptions): Promise<number> {
     // Surface deleted-on-server entries so the user knows. We KEEP them in
     // the index for now — sync push wouldn't do anything with them anyway,
     // and surprise-deleting local files would be more dangerous than helpful.
-    const remoteIds = new Set<number>(remotePages.map((p) => p.id));
+    //
+    // The remote-id set is built from `pageId` (the actual page id), NOT
+    // from the pageTree row's own `id`. The index stores page ids, so
+    // comparing against the row ids would flag every single page as
+    // "gone on server" — which is exactly what the first cut did.
+    const remoteIds = new Set<number>();
+    for (const node of remotePages) {
+      if (node.pageId !== null) remoteIds.add(node.pageId);
+    }
     for (const entry of index.entries) {
       if (!remoteIds.has(entry.id)) {
         process.stdout.write(
@@ -175,7 +183,18 @@ export async function runPull(opts: RunPullOptions): Promise<number> {
       }
     }
 
-    const newIndex: SyncIndex = { version: 1, entries: newEntries };
+    // Defence in depth: if the new entries list ever ends up with duplicate
+    // ids (the bug above produced one with every pull), keep only the
+    // last write per id. The per-page loop runs before the gone-on-server
+    // loop, so a "last-write-wins" dedup leaves the gone-on-server entry
+    // for pages that are truly absent (the only legitimate way both
+    // loops would write the same id is via a bug, in which case the
+    // gone-on-server version is conservatively the older state to keep).
+    const byId = new Map<number, SyncIndexEntry>();
+    for (const e of newEntries) byId.set(e.id, e);
+    const dedupedEntries = [...byId.values()];
+
+    const newIndex: SyncIndex = { version: 1, entries: dedupedEntries };
     await writeIndex(repo, newIndex);
     process.stderr.write(
       `✓ pull complete: ${added.toString()} added, ${updated.toString()} updated, ${renamed.toString()} renamed, ${skipped.toString()} skipped\n`,
