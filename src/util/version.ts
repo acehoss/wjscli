@@ -18,7 +18,7 @@ export function getVersion(): string {
     try {
       const raw = readFileSync(candidate, 'utf8');
       const parsed = JSON.parse(raw) as { name?: unknown; version?: unknown };
-      if (parsed.name === 'wikijs-mcp' && typeof parsed.version === 'string') {
+      if (parsed.name === 'wjscli' && typeof parsed.version === 'string') {
         cached = parsed.version;
         return cached;
       }

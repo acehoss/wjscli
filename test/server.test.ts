@@ -23,9 +23,9 @@ const stderrChunks: string[] = [];
 const savedEnv: Record<string, string | undefined> = {};
 
 beforeEach(async () => {
-  tmpRoot = await fs.mkdtemp(path.join(tmpdir(), 'wikijs-mcp-srv-'));
-  savedEnv.WIKIJS_MCP_CONFIG_DIR = process.env.WIKIJS_MCP_CONFIG_DIR;
-  process.env.WIKIJS_MCP_CONFIG_DIR = tmpRoot;
+  tmpRoot = await fs.mkdtemp(path.join(tmpdir(), 'wjscli-srv-'));
+  savedEnv.WJSCLI_CONFIG_DIR = process.env.WJSCLI_CONFIG_DIR;
+  process.env.WJSCLI_CONFIG_DIR = tmpRoot;
   stderrChunks.length = 0;
   stderrSpy = vi.spyOn(process.stderr, 'write').mockImplementation((chunk) => {
     stderrChunks.push(typeof chunk === 'string' ? chunk : chunk.toString('utf8'));
@@ -35,10 +35,10 @@ beforeEach(async () => {
 
 afterEach(async () => {
   stderrSpy.mockRestore();
-  if (savedEnv.WIKIJS_MCP_CONFIG_DIR === undefined) {
-    delete process.env.WIKIJS_MCP_CONFIG_DIR;
+  if (savedEnv.WJSCLI_CONFIG_DIR === undefined) {
+    delete process.env.WJSCLI_CONFIG_DIR;
   } else {
-    process.env.WIKIJS_MCP_CONFIG_DIR = savedEnv.WIKIJS_MCP_CONFIG_DIR;
+    process.env.WJSCLI_CONFIG_DIR = savedEnv.WJSCLI_CONFIG_DIR;
   }
   await fs.rm(tmpRoot, { recursive: true, force: true });
 });
@@ -63,9 +63,9 @@ describe('runServer — usage and config errors', () => {
     expect(code).toBe(1);
   });
 
-  it('missing-config stderr names "wikijs-mcp bootstrap" so the user knows what to do', async () => {
+  it('missing-config stderr names "wjscli validate" so the user knows what to do', async () => {
     await runServer([baseUrl], { smokeOnly: true });
-    expect(stderrText()).toContain('wikijs-mcp bootstrap');
+    expect(stderrText()).toContain('wjscli validate');
     expect(stderrText()).toContain(baseUrl);
   });
 

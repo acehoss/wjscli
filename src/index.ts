@@ -1,6 +1,7 @@
 #!/usr/bin/env node
-import { runBootstrap } from './bootstrap.js';
+import { runCli } from './cli/index.js';
 import { runServer } from './server.js';
+import { runValidate } from './validate.js';
 import { getVersion } from './util/version.js';
 
 export async function main(argv: string[]): Promise<number> {
@@ -25,31 +26,44 @@ export async function main(argv: string[]): Promise<number> {
     return 0;
   }
 
-  if (first === 'bootstrap') {
-    return runBootstrap(rest);
+  if (first === 'validate') {
+    return runValidate(rest);
+  }
+
+  if (first === 'mcp') {
+    return runServer(rest);
   }
 
   // Anything starting with `-` is an unknown option.
   if (first !== undefined && first.startsWith('-')) {
-    process.stderr.write(`wikijs-mcp: unknown option: ${first}\n`);
+    process.stderr.write(`wjscli: unknown option: ${first}\n`);
     printUsageToStderr();
     return 2;
   }
-  // A bare URL falls through to server mode; bad URLs and stray words are
-  // rejected there by canonicalizeBaseUrl with exit 2.
-  return runServer(args);
+  // A bare URL falls through to CLI mode: `wjscli <base-url> <group> [<verb>] [options...]`.
+  // Bad URLs and bad subcommands are rejected inside runCli with exit 2.
+  return runCli(args);
 }
 
 function usageText(): string {
   return [
-    'wikijs-mcp — MCP server for Wiki.js v2 (auth as a real human user)',
+    'wjscli — Wiki.js v2 CLI and MCP server (auth as a real human user)',
     '',
     'Usage:',
-    '  wikijs-mcp <base-url>                       Start MCP stdio server',
-    '  wikijs-mcp bootstrap <base-url> <jwt>       Validate JWT and write config',
-    '  wikijs-mcp --version                        Print version',
-    '  wikijs-mcp --help                           Print this help',
+    '  wjscli validate [-t] <base-url> <jwt>     Validate JWT, write config',
+    '                                            -t: stay running, keep token refreshed',
+    '  wjscli mcp <base-url>                     Start MCP stdio server',
+    '  wjscli <base-url> page get   --id N | --path P [--locale L]',
+    '  wjscli <base-url> page create --path P --title T --content C [...]',
+    '  wjscli <base-url> page update --id N [fields...]',
+    '  wjscli <base-url> page history --id N [--offset-page N --offset-size N]',
+    '  wjscli <base-url> pages tree [--parent N --mode ALL|PAGES|FOLDERS --locale L]',
+    '  wjscli <base-url> search <query> [--locale L]',
+    '  wjscli <base-url> tags list',
+    '  wjscli --version                          Print version',
+    '  wjscli --help                             Print this help',
     '',
+    'Add --json to any CLI subcommand for raw JSON output.',
     'See SPEC.md for the full design.',
     '',
   ].join('\n');
@@ -64,7 +78,7 @@ function printUsageToStderr(): void {
 const invokedAsBin =
   import.meta.url === `file://${process.argv[1] ?? ''}` ||
   process.argv[1]?.endsWith('/dist/index.js') === true ||
-  process.argv[1]?.endsWith('/wikijs-mcp') === true;
+  process.argv[1]?.endsWith('/wjscli') === true;
 
 if (invokedAsBin) {
   main(process.argv).then(
@@ -73,7 +87,7 @@ if (invokedAsBin) {
     },
     (err: unknown) => {
       process.stderr.write(
-        `wikijs-mcp: fatal: ${err instanceof Error ? err.message : String(err)}\n`,
+        `wjscli: fatal: ${err instanceof Error ? err.message : String(err)}\n`,
       );
       process.exit(1);
     },

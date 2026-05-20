@@ -41,7 +41,7 @@ describe('WikiClient — HTTP classification', () => {
     mock.setNext({ status: 401, body: 'Unauthorized' });
     const err = await client.gql('q').catch((e: unknown) => e);
     expect(err).toBeInstanceOf(AuthExpiredError);
-    expect((err as AuthExpiredError).message).toMatch(/rebootstrap|bootstrap/i);
+    expect((err as AuthExpiredError).message).toMatch(/re-validate|validate/i);
   });
 
   it('HTTP 400 → HttpError carrying the status', async () => {

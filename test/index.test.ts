@@ -12,9 +12,9 @@ const stderrWrites: string[] = [];
 const savedEnv: Record<string, string | undefined> = {};
 
 beforeEach(async () => {
-  tmpRoot = await fs.mkdtemp(path.join(tmpdir(), 'wikijs-mcp-idx-'));
-  savedEnv.WIKIJS_MCP_CONFIG_DIR = process.env.WIKIJS_MCP_CONFIG_DIR;
-  process.env.WIKIJS_MCP_CONFIG_DIR = tmpRoot;
+  tmpRoot = await fs.mkdtemp(path.join(tmpdir(), 'wjscli-idx-'));
+  savedEnv.WJSCLI_CONFIG_DIR = process.env.WJSCLI_CONFIG_DIR;
+  process.env.WJSCLI_CONFIG_DIR = tmpRoot;
   stdoutWrites.length = 0;
   stderrWrites.length = 0;
   stderrSpy = vi.spyOn(process.stderr, 'write').mockImplementation((chunk) => {
@@ -30,15 +30,15 @@ beforeEach(async () => {
 afterEach(async () => {
   stderrSpy.mockRestore();
   stdoutSpy.mockRestore();
-  if (savedEnv.WIKIJS_MCP_CONFIG_DIR === undefined) {
-    delete process.env.WIKIJS_MCP_CONFIG_DIR;
+  if (savedEnv.WJSCLI_CONFIG_DIR === undefined) {
+    delete process.env.WJSCLI_CONFIG_DIR;
   } else {
-    process.env.WIKIJS_MCP_CONFIG_DIR = savedEnv.WIKIJS_MCP_CONFIG_DIR;
+    process.env.WJSCLI_CONFIG_DIR = savedEnv.WJSCLI_CONFIG_DIR;
   }
   await fs.rm(tmpRoot, { recursive: true, force: true });
 });
 
-const argv = (...args: string[]): string[] => ['node', 'wikijs-mcp', ...args];
+const argv = (...args: string[]): string[] => ['node', 'wjscli', ...args];
 
 describe('main — argv routing', () => {
   it('returns 2 with no args (prints usage)', async () => {
@@ -48,7 +48,7 @@ describe('main — argv routing', () => {
   it('--help writes usage to stdout (pipeable) and exits 0', async () => {
     const code = await main(argv('--help'));
     expect(code).toBe(0);
-    expect(stdoutWrites.join('')).toContain('wikijs-mcp — MCP server for Wiki.js');
+    expect(stdoutWrites.join('')).toContain('wjscli — Wiki.js v2 CLI and MCP server');
     expect(stderrWrites.join('')).toBe('');
   });
 
@@ -82,20 +82,30 @@ describe('main — argv routing', () => {
     expect(await main(argv('--bogus'))).toBe(2);
   });
 
-  it('routes bootstrap to runBootstrap (rejects bad URL → exit 2)', async () => {
-    // No network call needed: bootstrap rejects on URL parse before fetching.
-    expect(await main(argv('bootstrap', 'not a url', 'a.b.c'))).toBe(2);
+  it('routes validate to runValidate (rejects bad URL → exit 2)', async () => {
+    // No network call needed: validate rejects on URL parse before fetching.
+    expect(await main(argv('validate', 'not a url', 'a.b.c'))).toBe(2);
   });
 
-  it('bare bootstrap (no URL, no JWT) routes through and exits 2', async () => {
-    // Proves the bootstrap subcommand is wired up even when no positional
-    // args follow. runBootstrap handles the usage error.
-    expect(await main(argv('bootstrap'))).toBe(2);
+  it('bare validate (no URL, no JWT) routes through and exits 2', async () => {
+    // Proves the validate subcommand is wired up even when no positional
+    // args follow. runValidate handles the usage error.
+    expect(await main(argv('validate'))).toBe(2);
   });
 
-  it('routes a bare URL to runServer (missing config → exit 1)', async () => {
-    // We exercise the routing, not the server runtime. With no config seeded,
-    // runServer hits MissingConfigError and exits 1.
-    expect(await main(argv('https://wiki.example.com'))).toBe(1);
+  it('routes mcp <url> to runServer (missing config → exit 1)', async () => {
+    expect(await main(argv('mcp', 'https://wiki.example.com'))).toBe(1);
+  });
+
+  it('routes a bare URL to the CLI dispatcher (no command → exit 2)', async () => {
+    // CLI mode with a URL but no command word fails inside runCli with the
+    // "unknown command" usage error.
+    expect(await main(argv('https://wiki.example.com'))).toBe(2);
+    expect(stderrWrites.join('')).toContain('unknown command');
+  });
+
+  it('routes <url> tags list to the CLI (missing config → exit 1)', async () => {
+    expect(await main(argv('https://wiki.example.com', 'tags', 'list'))).toBe(1);
+    expect(stderrWrites.join('')).toContain('wjscli validate');
   });
 });

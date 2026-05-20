@@ -26,9 +26,9 @@ let ctx: TestCtx;
 const savedEnv: Record<string, string | undefined> = {};
 
 beforeEach(async () => {
-  const tmpRoot = await fs.mkdtemp(path.join(tmpdir(), 'wikijs-mcp-ts-'));
-  savedEnv.WIKIJS_MCP_CONFIG_DIR = process.env.WIKIJS_MCP_CONFIG_DIR;
-  process.env.WIKIJS_MCP_CONFIG_DIR = tmpRoot;
+  const tmpRoot = await fs.mkdtemp(path.join(tmpdir(), 'wjscli-ts-'));
+  savedEnv.WJSCLI_CONFIG_DIR = process.env.WJSCLI_CONFIG_DIR;
+  process.env.WJSCLI_CONFIG_DIR = tmpRoot;
   ctx = { tmpRoot, stores: [] };
 });
 
@@ -36,10 +36,10 @@ afterEach(async () => {
   for (const s of ctx.stores) {
     await s.close();
   }
-  if (savedEnv.WIKIJS_MCP_CONFIG_DIR === undefined) {
-    delete process.env.WIKIJS_MCP_CONFIG_DIR;
+  if (savedEnv.WJSCLI_CONFIG_DIR === undefined) {
+    delete process.env.WJSCLI_CONFIG_DIR;
   } else {
-    process.env.WIKIJS_MCP_CONFIG_DIR = savedEnv.WIKIJS_MCP_CONFIG_DIR;
+    process.env.WJSCLI_CONFIG_DIR = savedEnv.WJSCLI_CONFIG_DIR;
   }
   await fs.rm(ctx.tmpRoot, { recursive: true, force: true });
 });
@@ -230,8 +230,8 @@ describe('TokenStore file watcher', () => {
   });
 
   it('survives a self-write and still notices a later external rewrite', async () => {
-    // Bootstrap-from-another-shell flow: after a self-refresh, an outside
-    // `wikijs-mcp bootstrap` must still take effect live. fs.watch on a file
+    // Validate-from-another-shell flow: after a self-refresh, an outside
+    // `wjscli validate` must still take effect live. fs.watch on a file
     // path would lose its inode on the self-rename; directory-watch + basename
     // filter is the fix.
     await seed({ jwt: 'old.jwt' });

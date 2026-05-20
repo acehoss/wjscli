@@ -281,7 +281,7 @@ describe('MCP end-to-end — error serialization (6b three-tier)', () => {
       .callTool({ name: 'wiki_tags_list', arguments: {} })
       .catch((e: unknown) => e);
     expect(err).toBeInstanceOf(Error);
-    expect((err as Error).message).toMatch(/JWT rejected|bootstrap/i);
+    expect((err as Error).message).toMatch(/JWT rejected|validate/i);
   });
 });
 

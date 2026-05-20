@@ -20,7 +20,7 @@ export async function runServer(
   deps: RunServerDeps = {},
 ): Promise<number> {
   if (args.length !== 1) {
-    process.stderr.write('usage: wikijs-mcp <base-url>\n');
+    process.stderr.write('usage: wjscli mcp <base-url>\n');
     return 2;
   }
 
@@ -29,7 +29,7 @@ export async function runServer(
     baseUrl = canonicalizeBaseUrl(args[0] ?? '');
   } catch (err) {
     process.stderr.write(
-      `wikijs-mcp: ${err instanceof Error ? err.message : String(err)}\n`,
+      `wjscli: ${err instanceof Error ? err.message : String(err)}\n`,
     );
     return 2;
   }
@@ -40,13 +40,13 @@ export async function runServer(
   } catch (err) {
     if (err instanceof MissingConfigError) {
       process.stderr.write(
-        `wikijs-mcp: ${err.message}\n` +
-          `  No config found. Run: wikijs-mcp bootstrap ${baseUrl} <jwt>\n`,
+        `wjscli: ${err.message}\n` +
+          `  No config found. Run: wjscli validate ${baseUrl} <jwt>\n`,
       );
       return 1;
     }
     process.stderr.write(
-      `wikijs-mcp: failed to load config: ${err instanceof Error ? err.message : String(err)}\n`,
+      `wjscli: failed to load config: ${err instanceof Error ? err.message : String(err)}\n`,
     );
     return 1;
   }
@@ -68,7 +68,7 @@ export async function runServer(
     await server.connect(transport);
   } catch (err) {
     process.stderr.write(
-      `wikijs-mcp: MCP transport failed: ${err instanceof Error ? err.message : String(err)}\n`,
+      `wjscli: MCP transport failed: ${err instanceof Error ? err.message : String(err)}\n`,
     );
     await store.close();
     return 1;
@@ -94,7 +94,7 @@ export type BuiltServer = {
 // seven v1 tool handlers onto the Server (see src/tools/index.ts).
 export function buildServer(args: BuildServerArgs): BuiltServer {
   const server = new Server(
-    { name: 'wikijs-mcp', version: getVersion() },
+    { name: 'wjscli', version: getVersion() },
     { capabilities: { tools: {} } },
   );
   registerTools(server, args.client);
@@ -142,7 +142,7 @@ export function installShutdownHandlers(args: InstallShutdownArgs): ShutdownHand
       // normal exit and we don't want it to short-circuit the graceful path.
       if (signal !== 'beforeExit') {
         proc.stderr.write(
-          `wikijs-mcp: ${signal} received again, forcing exit\n`,
+          `wjscli: ${signal} received again, forcing exit\n`,
         );
         proc.exit(exitCode);
       }
@@ -150,14 +150,14 @@ export function installShutdownHandlers(args: InstallShutdownArgs): ShutdownHand
     }
     shuttingDown = true;
     if (signal !== 'beforeExit') {
-      proc.stderr.write(`wikijs-mcp: ${signal} received, shutting down…\n`);
+      proc.stderr.write(`wjscli: ${signal} received, shutting down…\n`);
     }
     void (async () => {
       try {
         await store.close();
       } catch (err) {
         proc.stderr.write(
-          `wikijs-mcp: shutdown error: ${err instanceof Error ? err.message : String(err)}\n`,
+          `wjscli: shutdown error: ${err instanceof Error ? err.message : String(err)}\n`,
         );
       } finally {
         if (signal !== 'beforeExit') {

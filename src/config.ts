@@ -38,13 +38,13 @@ export function hostFromBaseUrl(baseUrl: string): string {
 }
 
 export function configDir(): string {
-  const override = process.env.WIKIJS_MCP_CONFIG_DIR;
+  const override = process.env.WJSCLI_CONFIG_DIR;
   if (override && override.length > 0) {
     return override;
   }
   const xdg = process.env.XDG_CONFIG_HOME;
   const base = xdg && xdg.length > 0 ? xdg : path.join(homedir(), '.config');
-  return path.join(base, 'wikijs-mcp');
+  return path.join(base, 'wjscli');
 }
 
 export function configPathForBaseUrl(baseUrl: string): string {

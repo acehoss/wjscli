@@ -17,17 +17,17 @@ let tmpRoot: string;
 const savedEnv: Record<string, string | undefined> = {};
 
 beforeEach(async () => {
-  tmpRoot = await fs.mkdtemp(path.join(tmpdir(), 'wikijs-mcp-cfg-'));
-  savedEnv.WIKIJS_MCP_CONFIG_DIR = process.env.WIKIJS_MCP_CONFIG_DIR;
+  tmpRoot = await fs.mkdtemp(path.join(tmpdir(), 'wjscli-cfg-'));
+  savedEnv.WJSCLI_CONFIG_DIR = process.env.WJSCLI_CONFIG_DIR;
   savedEnv.XDG_CONFIG_HOME = process.env.XDG_CONFIG_HOME;
-  process.env.WIKIJS_MCP_CONFIG_DIR = tmpRoot;
+  process.env.WJSCLI_CONFIG_DIR = tmpRoot;
 });
 
 afterEach(async () => {
-  if (savedEnv.WIKIJS_MCP_CONFIG_DIR === undefined) {
-    delete process.env.WIKIJS_MCP_CONFIG_DIR;
+  if (savedEnv.WJSCLI_CONFIG_DIR === undefined) {
+    delete process.env.WJSCLI_CONFIG_DIR;
   } else {
-    process.env.WIKIJS_MCP_CONFIG_DIR = savedEnv.WIKIJS_MCP_CONFIG_DIR;
+    process.env.WJSCLI_CONFIG_DIR = savedEnv.WJSCLI_CONFIG_DIR;
   }
   if (savedEnv.XDG_CONFIG_HOME === undefined) {
     delete process.env.XDG_CONFIG_HOME;
@@ -141,20 +141,20 @@ describe('hostFromBaseUrl', () => {
 });
 
 describe('configDir', () => {
-  it('honors WIKIJS_MCP_CONFIG_DIR override', () => {
+  it('honors WJSCLI_CONFIG_DIR override', () => {
     expect(configDir()).toBe(tmpRoot);
   });
 
   it('falls back to XDG_CONFIG_HOME when override is unset', () => {
-    delete process.env.WIKIJS_MCP_CONFIG_DIR;
+    delete process.env.WJSCLI_CONFIG_DIR;
     process.env.XDG_CONFIG_HOME = '/nope/xdg';
-    expect(configDir()).toBe(path.join('/nope/xdg', 'wikijs-mcp'));
+    expect(configDir()).toBe(path.join('/nope/xdg', 'wjscli'));
   });
 
   it('falls back to ~/.config when both env vars are unset', () => {
-    delete process.env.WIKIJS_MCP_CONFIG_DIR;
+    delete process.env.WJSCLI_CONFIG_DIR;
     delete process.env.XDG_CONFIG_HOME;
-    expect(configDir()).toBe(path.join(homedir(), '.config', 'wikijs-mcp'));
+    expect(configDir()).toBe(path.join(homedir(), '.config', 'wjscli'));
   });
 });
 

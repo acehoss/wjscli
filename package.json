@@ -1,13 +1,13 @@
 {
-  "name": "wikijs-mcp",
-  "version": "0.1.0",
-  "description": "MCP server that talks to a Wiki.js v2 instance as a real human user via their JWT.",
+  "name": "wjscli",
+  "version": "0.2.0",
+  "description": "Wiki.js v2 CLI and MCP server that authenticates as a real human user via their JWT.",
   "type": "module",
   "engines": {
     "node": ">=20"
   },
   "bin": {
-    "wikijs-mcp": "dist/index.js"
+    "wjscli": "dist/index.js"
   },
   "main": "dist/index.js",
   "files": [

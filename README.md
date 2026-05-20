@@ -1,13 +1,18 @@
-# wikijs-mcp
+# wjscli
 
-An [MCP](https://modelcontextprotocol.io/) server that lets agents (Claude Desktop, MCP Inspector, custom CLIs) read from and write to a [Wiki.js v2](https://js.wiki/) instance **as a real human user** — by riding the same JWT the browser uses. Page edits are attributed to that user's account; permissions and audit trail stay honest; no admin API key required.
+A CLI **and** [MCP](https://modelcontextprotocol.io/) server for [Wiki.js v2](https://js.wiki/) that authenticates **as a real human user** — by riding the same JWT the browser uses. Page edits are attributed to that user's account; permissions and audit trail stay honest; no admin API key required.
+
+The same set of seven Wiki.js tools is available two ways:
+
+- **MCP stdio server** (`wjscli mcp <url>`) — for Claude Desktop, MCP Inspector, custom MCP clients.
+- **CLI** (`wjscli <url> page get --id 42`, `wjscli <url> search "needle"`, etc.) — for shells, scripts, and ad-hoc use.
 
 ## Why
 
 - **Real user attribution.** `creatorId` and `authorId` on every page edit point at the actual person, not a shared API key. The audit log is meaningful.
-- **Permissions come for free.** The MCP can only do what the user can do — Wiki.js enforces `read:pages` / `write:pages` / `manage:system` server-side against the JWT's `groups`.
-- **No admin API key needed.** Wiki.js v2's built-in API tokens require admin rights and bypass per-user permissions. This MCP avoids that by riding the regular browser JWT instead.
-- **Long-running.** Wiki.js's JWT lifetime is 30 minutes, but the server emits a `new-jwt` response header when a token is nearing expiry. The MCP captures that header and updates its stored token, so a process can stay alive indefinitely as long as it makes at least one call per 30 minutes.
+- **Permissions come for free.** wjscli can only do what the user can do — Wiki.js enforces `read:pages` / `write:pages` / `manage:system` server-side against the JWT's `groups`.
+- **No admin API key needed.** Wiki.js v2's built-in API tokens require admin rights and bypass per-user permissions. wjscli avoids that by riding the regular browser JWT instead.
+- **Long-running.** Wiki.js's JWT lifetime is 30 minutes, but the server emits a `new-jwt` response header when a token is nearing expiry. wjscli captures that header and updates its stored token, so a process can stay alive indefinitely as long as it makes at least one call per 30 minutes. The `validate -t` daemon polls just often enough to keep the token live across idle stretches.
 - **stdio MCP.** No HTTP listener, no port. Standard MCP transport — drops into Claude Desktop and similar clients with one config block.
 
 ## Install
@@ -17,21 +22,21 @@ Not published to npm. Two paths:
 **Install directly from GitHub** (preferred for users who just want to run it):
 
 ```sh
-npm install -g git+https://github.com/acehoss/wikijs-mcp.git
+npm install -g git+https://github.com/acehoss/wjscli.git
 ```
 
-The `prepare` script in `package.json` builds `dist/` automatically during install, so `wikijs-mcp` lands on your `$PATH` ready to run.
+The `prepare` script in `package.json` builds `dist/` automatically during install, so `wjscli` lands on your `$PATH` ready to run.
 
 **From a clone** (for hacking on it):
 
 ```sh
-git clone https://github.com/acehoss/wikijs-mcp.git
-cd wikijs-mcp
+git clone https://github.com/acehoss/wjscli.git
+cd wjscli
 npm install
 npm link
 ```
 
-`npm link` symlinks the working tree's `dist/index.js` into your global PATH as `wikijs-mcp`. Rebuild (`npm run build`) and changes are picked up immediately — no re-link needed. Remove with `npm unlink -g wikijs-mcp`.
+`npm link` symlinks the working tree's `dist/index.js` into your global PATH as `wjscli`. Rebuild (`npm run build`) and changes are picked up immediately — no re-link needed. Remove with `npm unlink -g wjscli`.
 
 Requires Node ≥ 20.
 
@@ -39,34 +44,76 @@ Requires Node ≥ 20.
 
 1. Install — see [Install](#install) above.
 2. Get a JWT from your browser. See [Getting a JWT](#getting-a-jwt) — about 10 seconds in DevTools.
-3. Bootstrap the config:
+3. Validate the JWT and write the config:
 
     ```sh
-    wikijs-mcp bootstrap https://wiki.example.com <jwt>
+    wjscli validate https://wiki.example.com <jwt>
     ```
 
-    On success this writes `~/.config/wikijs-mcp/wiki.example.com.json` (mode `0600`) and prints something like:
+    On success this writes `~/.config/wjscli/wiki.example.com.json` (mode `0600`) and prints something like:
 
     ```text
     Connecting to https://wiki.example.com…
     ✓ Authenticated as Example User <user@example.com> (id=7)
-    ✓ Config written to /home/user/.config/wikijs-mcp/wiki.example.com.json
+    ✓ Config written to /home/user/.config/wjscli/wiki.example.com.json
     ```
 
-4. Add to your MCP client config. For Claude Desktop, edit `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) or the equivalent on your platform:
+4. (Optional, for MCP) Add to your MCP client config. For Claude Desktop, edit `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) or the equivalent on your platform:
 
     ```json
     {
       "mcpServers": {
         "wikijs": {
-          "command": "wikijs-mcp",
-          "args": ["https://wiki.example.com"]
+          "command": "wjscli",
+          "args": ["mcp", "https://wiki.example.com"]
         }
       }
     }
     ```
 
 5. Restart your MCP client. The seven `wiki_*` tools should appear.
+
+You can also drive the same tools directly:
+
+```sh
+wjscli https://wiki.example.com tags list
+wjscli https://wiki.example.com search "onboarding"
+wjscli https://wiki.example.com page get --id 42
+wjscli https://wiki.example.com page get --path team/onboarding
+```
+
+## CLI surface
+
+```text
+wjscli validate [-t] <base-url> <jwt>     Validate JWT, write config
+                                          -t: stay running, keep token refreshed
+wjscli mcp <base-url>                     Start MCP stdio server
+
+wjscli <base-url> pages tree [--parent N --mode ALL|PAGES|FOLDERS --locale L]
+wjscli <base-url> page get   --id N | --path P [--locale L]
+wjscli <base-url> page create --path P --title T --content C [...]
+wjscli <base-url> page update --id N [fields...]
+wjscli <base-url> page history --id N [--offset-page N --offset-size N]
+wjscli <base-url> search <query> [--locale L]
+wjscli <base-url> tags list
+
+wjscli --version
+wjscli --help
+```
+
+Add `--json` to any CLI subcommand for the raw MCP-equivalent JSON payload. Default output is a small human-readable rendering per command (tree for `pages tree`, key/value + content for `page get`, table-ish for `search` and `page history`, etc.).
+
+`page create` and `page update` accept `--content -` to read content from stdin or `--content @path/to/file.md` to read from a file. The same `@-` / `@path` indirection works for `--description`.
+
+Boolean toggles use `--published` / `--no-published` and `--private` / `--no-private`. To pass a value explicitly: `--published=true` / `--published=false`.
+
+Tags are repeatable and comma-splittable: `--tag a --tag b` or `--tag a,b` (both produce `['a', 'b']`).
+
+### Daemon mode (`validate -t`)
+
+`wjscli validate -t <url> <jwt>` does the same one-shot probe as `validate`, writes the config, and then **keeps running** — polling Wiki.js's lightweight `users.profile` query every five minutes to give the server a chance to emit a `new-jwt` refresh header. Any refresh is persisted to the config file atomically. This keeps the stored JWT alive across idle stretches when no MCP or CLI calls are happening.
+
+The daemon exits cleanly on SIGINT/SIGTERM. It also exits (non-zero) if the JWT is rejected — at that point only a fresh JWT can recover.
 
 ## Getting a JWT
 
@@ -78,7 +125,7 @@ Open DevTools on any authenticated Wiki.js page and paste into the console:
 copy(document.cookie.split('; ').find(c => c.startsWith('jwt=')).slice(4))
 ```
 
-The JWT is now on your clipboard. Paste it into the `bootstrap` command.
+The JWT is now on your clipboard. Paste it into the `validate` command.
 
 If you want a permanent bookmark, save this as a bookmarklet URL (one line, including the `javascript:` prefix):
 
@@ -91,69 +138,71 @@ Click the bookmark while viewing a logged-in Wiki.js tab to copy the current JWT
 **Security notes:**
 
 - The JWT is a bearer credential. Anyone who has it can act as you against Wiki.js for the remaining lifetime of the token (default 30 minutes from the most recent refresh).
-- The MCP stores it on disk in plaintext at mode `0600` (user-readable only). The containing directory is mode `0700`.
+- wjscli stores it on disk in plaintext at mode `0600` (user-readable only). The containing directory is mode `0700`.
 - Treat it like a password: don't paste it into chat, don't commit it, don't email it.
 
-## Tools
+## MCP tools
 
-After bootstrap and restart, your MCP client sees these seven tools:
+After validation and (re)start, your MCP client sees these seven tools:
 
 | Tool | What it does |
 | --- | --- |
 | `wiki_pages_tree` | List a flat slice of the Wiki.js page tree under a parent node. Each entry includes `depth` and `parent` so the caller can rebuild the hierarchy. Defaults: parent=0 (root), mode=ALL, locale=en. |
 | `wiki_page_get` | Fetch a single Wiki.js page by `id` or by `{path, locale?}` (exactly one — never both, never neither). Returns the full Page record (title, path, content, contentType, tags, isPublished, createdAt, updatedAt, authorName, etc.). |
-| `wiki_page_create` | Create a Wiki.js page. Required: `path`, `title`, `content`. Defaults applied for unspecified fields: description="", editor="markdown", locale="en", tags=[], isPublished=true, isPrivate=false. The created page is attributed to the user whose JWT was used at bootstrap. |
-| `wiki_page_update` | Update a Wiki.js page. Requires `id` plus at least one field to change. Only supplied fields are sent — omitted fields are left untouched. The update is attributed to the bootstrap user. |
+| `wiki_page_create` | Create a Wiki.js page. Required: `path`, `title`, `content`. Defaults applied for unspecified fields: description="", editor="markdown", locale="en", tags=[], isPublished=true, isPrivate=false. The created page is attributed to the user whose JWT was validated. |
+| `wiki_page_update` | Update a Wiki.js page. Requires `id` plus at least one field to change. Only supplied fields are sent — omitted fields are left untouched. The update is attributed to the user whose JWT was validated. |
 | `wiki_search` | Search Wiki.js pages. Returns `{ results, suggestions, totalHits }` as Wiki.js does — results may be empty with `totalHits=0` if no search engine is configured on the server. Results are filtered by the calling user's `read:pages` permission. |
 | `wiki_tags_list` | List all tags across pages the calling user can read. Filtered server-side by `read:pages`. |
 | `wiki_page_history` | Fetch the revision history of a Wiki.js page. Paginated via `offsetPage` (default 0) and `offsetSize` (Wiki.js default 100). Requires the calling user have `manage:system` or `read:history`. |
 
 Tool outputs are pretty-printed JSON in a single MCP `text` content block. Tool-execution errors (HTTP, network, GraphQL) come back as `{ isError: true, content: [...] }` with a `{ code, message }` JSON payload — agents see the failure as a normal tool result they can react to, not as a transport-layer error.
 
+The CLI subcommands listed above wrap exactly these seven tools.
+
 ## Configuration
 
-- **Location:** `${XDG_CONFIG_HOME:-$HOME/.config}/wikijs-mcp/<host>.json`, where `<host>` is the URL host (lowercased, including a non-default port if any). Examples: `wiki.example.com.json`, `wiki.example.com:8443.json`.
+- **Location:** `${XDG_CONFIG_HOME:-$HOME/.config}/wjscli/<host>.json`, where `<host>` is the URL host (lowercased, including a non-default port if any). Examples: `wiki.example.com.json`, `wiki.example.com:8443.json`.
 - **File mode:** `0600`. **Containing dir mode:** `0700`.
-- **Override the config dir** with the `WIKIJS_MCP_CONFIG_DIR` env var (mostly useful for tests).
+- **Override the config dir** with the `WJSCLI_CONFIG_DIR` env var (mostly useful for tests).
 - **Schema:** `{ baseUrl, jwt, refreshedAt, note? }` — see [SPEC.md](./SPEC.md#config-file) for the field list.
 
-The bootstrap command writes this file atomically (tmp file + fsync + rename), so a crashed bootstrap never leaves a corrupt config.
+The `validate` command writes this file atomically (tmp file + fsync + rename), so a crashed `validate` never leaves a corrupt config.
 
 ## How it stays alive
 
-Wiki.js v2's JWT lifetime is 30 minutes from issue. The server emits a `new-jwt` response header on any authenticated `Content-Type: application/json` request when the token is in its renewal window. This MCP captures that header, updates the in-memory token, and atomically writes the new value back to the config file (debounced ~250 ms).
+Wiki.js v2's JWT lifetime is 30 minutes from issue. The server emits a `new-jwt` response header on any authenticated `Content-Type: application/json` request when the token is in its renewal window. wjscli captures that header, updates the in-memory token, and atomically writes the new value back to the config file (debounced ~250 ms).
 
 In practice this means:
 
 - If your MCP client uses the wiki at least once every 30 minutes, the JWT stays refreshed indefinitely.
-- If the MCP sits idle for more than 30 minutes, the next call gets an auth-rejection from Wiki.js → the MCP surfaces that as an `AuthExpiredError` McpError with re-bootstrap guidance.
-- A file watcher on the config also notices if you re-bootstrap from another shell — the running MCP picks up the new JWT live without needing to restart.
+- For idle stretches, run `wjscli validate -t <url> <jwt>` in a separate shell as a daemon — it polls every 5 minutes to keep the refresh window covered.
+- If the JWT expires beyond auto-refresh range, the next call gets an auth-rejection from Wiki.js → wjscli surfaces that as an `AuthExpiredError` with re-validate guidance.
+- A file watcher on the config also notices if you re-validate from another shell — a running MCP or daemon picks up the new JWT live without needing to restart.
 
-## Re-bootstrapping
+## Re-validating
 
 When you see a tool call fail with `JWT rejected by server` or `Wiki.js rejected the JWT for <url>`, the stored token has expired beyond auto-refresh range. Two-step fix:
 
 1. Grab a fresh JWT (DevTools console or bookmarklet — see [Getting a JWT](#getting-a-jwt)).
-2. Re-run `wikijs-mcp bootstrap <base-url> <jwt>`.
+2. Re-run `wjscli validate <base-url> <jwt>`.
 
-The running MCP server picks up the new config automatically (file watcher); you don't need to restart your MCP client unless a tool call was in flight.
+The running MCP server (or daemon) picks up the new config automatically (file watcher); you don't need to restart your MCP client unless a tool call was in flight.
 
 ## Limitations (v1)
 
 - **No assets/uploads.** Page bodies only.
 - **No page move/delete.** Read and write to existing or new paths only.
-- **No admin/user management.** Per-user permissions apply, but you can't manage users/groups through this MCP.
-- **No proactive heartbeat.** JWT refresh happens opportunistically, on calls. Idle-longer-than-30-min → expired.
-- **One base URL per process.** If you need MCP access to two Wiki.js instances, run two `wikijs-mcp` processes.
+- **No admin/user management.** Per-user permissions apply, but you can't manage users/groups through wjscli.
+- **One base URL per process.** If you need access to two Wiki.js instances, run two processes / use two configs.
 - **`pages.search` doesn't expose its `path` prefix filter.** Just `query` and `locale`.
 
 ## Security
 
 - The JWT is a bearer credential. Anyone holding it can act as you against Wiki.js until it expires.
 - Stored at mode `0600` in your user config dir. The directory is `0700`. Don't copy the file or share its contents.
-- The JWT is **never logged** by this MCP — error messages from the underlying HTTP / GraphQL client are run through a redactor that scrubs JWT-shaped substrings before they reach any output. Tool result content carries only the structured `{code, message}`, never the token.
+- The JWT is **never logged** by wjscli — error messages from the underlying HTTP / GraphQL client are run through a redactor that scrubs JWT-shaped substrings before they reach any output. Tool result content carries only the structured `{code, message}`, never the token.
 - A new-jwt refresh debounces a write to disk; on process shutdown (SIGINT/SIGTERM/normal exit) any pending write is flushed before exit.
-- `stdout` is reserved for MCP stdio framing. All bootstrap output and all error messages go to `stderr`.
+- `stdout` is reserved for MCP stdio framing (in `mcp` mode) and for CLI command output. All `validate` output and all error messages go to `stderr`.
 
 ## Development
 
@@ -174,9 +223,11 @@ The full design lives in [SPEC.md](./SPEC.md). Tests are organized as:
 - `test/token-store.test.ts` — JWT lifecycle, debounced disk writes, file watcher.
 - `test/wiki/client.test.ts` — HTTP / GraphQL / network classification, JWT redaction, retry policy, `new-jwt` capture.
 - `test/wiki/queries.test.ts` — GraphQL document pin-tests.
-- `test/bootstrap.test.ts` — `wikijs-mcp bootstrap` end-to-end against an in-process Wiki.js mock.
-- `test/server.test.ts` — `wikijs-mcp <url>` startup, signal handling.
-- `test/index.test.ts` — argv dispatch.
+- `test/validate.test.ts` — `wjscli validate` (with and without `-t`) end-to-end against an in-process Wiki.js mock.
+- `test/server.test.ts` — `wjscli mcp <url>` startup, signal handling.
+- `test/index.test.ts` — top-level argv dispatch.
+- `test/cli/argv.test.ts` — CLI argv reader unit tests.
+- `test/cli/run.test.ts` — CLI dispatch end-to-end through `runCli` against the mock.
 - `test/tools/*.test.ts` — per-tool happy / Zod / auth-expired / GraphQL paths via `dispatchTool` directly.
 - `test/tools/e2e.test.ts` — one round trip per tool through real `Server` + `Client` over an in-memory transport pair, plus JWT-refresh integration.
 - `test/mock/graphql-server.ts` — typed mock backend used by everything above except the standalone client tests.

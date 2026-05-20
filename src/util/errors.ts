@@ -31,7 +31,7 @@ export class MissingConfigError extends WikiMcpError {
   constructor(path: string, baseUrl: string) {
     super(
       'missing_config',
-      `no JWT on disk for ${baseUrl} (expected at ${path}); run: wikijs-mcp bootstrap ${baseUrl} <jwt>`,
+      `no JWT on disk for ${baseUrl} (expected at ${path}); run: wjscli validate ${baseUrl} <jwt>`,
     );
     this.path = path;
   }
@@ -77,7 +77,7 @@ export class AuthExpiredError extends WikiMcpError {
   constructor(baseUrl: string, detail: string) {
     super(
       'auth_expired',
-      `Wiki.js rejected the JWT for ${baseUrl} (${detail}). Re-bootstrap with: wikijs-mcp bootstrap ${baseUrl} <jwt>`,
+      `Wiki.js rejected the JWT for ${baseUrl} (${detail}). Re-validate with: wjscli validate ${baseUrl} <jwt>`,
     );
     this.baseUrl = baseUrl;
   }
