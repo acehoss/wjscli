@@ -101,6 +101,12 @@ wjscli <base-url> page history <id-or-path> [--offset-page N --offset-size N --l
 wjscli <base-url> search <query> [--locale L]
 wjscli <base-url> tags list
 
+wjscli sync clone <base-url> <dir>           Clone a wiki to local markdown files
+wjscli sync status [-C dir] [--remote]       Show what changed since last sync
+wjscli sync pull [-C dir] [--force]          Re-fetch updates from the wiki
+wjscli sync push [-C dir] [--force] [--dry-run]
+                                             Upload locally-modified pages
+
 wjscli --version
 wjscli --help
 ```
@@ -116,6 +122,61 @@ $ wjscli https://wiki.example.com pages tree
 ```
 
 `pages tree` recurses 20 levels by default — pass `--depth N` to limit it. Every subcommand accepts `-h` / `--help` for command-specific usage, including options and examples:
+
+## Sync (clone the whole wiki to markdown files)
+
+`wjscli sync` mirrors a Wiki.js instance to a local directory of markdown files with YAML frontmatter, then lets you pull, push, and inspect status from there. It's a git-like working tree of the wiki, useful for agents (everything is a file), bulk edits, and offline editing.
+
+```sh
+# initial clone (creates ./wiki/.wjscli/{config,index}.json + one .md per page)
+wjscli sync clone https://wiki.example.com ./wiki
+cd wiki
+
+# show what changed locally
+wjscli sync status
+
+# also check whether the server has changed since last sync (one query per page)
+wjscli sync status --remote
+
+# re-fetch from the server; skips files you've edited locally unless --force
+wjscli sync pull
+wjscli sync pull --force
+
+# upload locally-modified pages; refuses to overwrite if the server's
+# `updatedAt` has drifted since last sync (unless --force)
+wjscli sync push
+wjscli sync push --dry-run   # list what would be pushed without changing anything
+wjscli sync push --force     # overwrite anyway
+```
+
+Each page becomes a markdown file at the path it lives at in the wiki (`team/onboarding` → `team/onboarding.md`). The frontmatter holds the page's metadata (id, path, title, description, tags, locale, isPublished, isPrivate, plus informational createdAt/updatedAt/authorName):
+
+```markdown
+---
+id: 42
+path: team/onboarding
+title: Onboarding Guide
+description: How to get started
+locale: en
+editor: markdown
+isPublished: true
+isPrivate: false
+tags:
+  - guide
+  - onboarding
+createdAt: 2026-01-01T00:00:00Z
+updatedAt: 2026-05-19T10:42:00Z
+authorId: 7
+authorName: Aaron Heise
+---
+# Onboarding Guide
+
+Welcome to the team!
+```
+
+Edit the frontmatter to rename a page (change `path:`), retag it, mark it private, etc. — those go to the wiki on push. The `id` field is read-only on push (it identifies which page to update; never written as a setting). `createdAt`, `updatedAt`, `authorId`, `authorName` are informational and ignored on push.
+
+Conflict detection: the `.wjscli/index.json` records the server's `updatedAt` at last sync and a SHA-256 of the file content as written. `sync status` recomputes the hash to spot local edits; `sync push` re-queries the server's current `updatedAt` and refuses to overwrite if it has drifted (so two people editing the same page won't silently clobber each other).
 
 ```sh
 wjscli https://wiki.example.com pages tree --help

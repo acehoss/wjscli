@@ -100,6 +100,66 @@ Tool-execution errors (HTTP / GraphQL / network) surface to stderr with the stru
 
 Every subcommand (`validate`, `mcp`, and each CLI command) recognises `-h` / `--help` at any position in its args. Help text is printed to stdout (it's a user request, so it's pipeable) and the process exits `0`. Help short-circuits before any config-loading or arg-validation, so `wjscli <url> page update --id 42 -h` prints the page-update help even though `--id` alone would otherwise be a usage error.
 
+## Sync (clone-pull-push)
+
+`wjscli sync` is a top-level subcommand (NOT URL-first, deliberately git-style) that mirrors a Wiki.js instance to a local working tree of markdown files. The URL lives inside the clone, so post-clone invocations don't take a URL on the command line.
+
+```text
+wjscli sync clone <base-url> <dir> [--locale L]
+wjscli sync status [-C <dir>] [--remote]
+wjscli sync pull   [-C <dir>] [--force]
+wjscli sync push   [-C <dir>] [--force] [--dry-run]
+wjscli sync -h | --help
+```
+
+### Working tree layout
+
+```text
+<clone>/
+├── .wjscli/
+│   ├── config.json      # baseUrl, locale, clonedAt
+│   └── index.json       # per-page sync state
+└── <wiki-paths>.md       # one .md file per page
+```
+
+A page at Wiki.js path `team/onboarding` lives at `<clone>/team/onboarding.md`. Directories are created as needed; `.md` is appended. The path canonicaliser refuses suspicious segments (`..`, empty, NUL) to defend against a malicious server tricking us into escaping the clone root.
+
+### File format
+
+Each page file begins with a YAML frontmatter block delimited by `---\n` ... `---\n`, then the page body verbatim. The frontmatter is the documented projection of the Wiki.js `Page` record (see `src/sync/format.ts:PageFrontmatter`); fields the wiki understands are sent on push, informational fields (createdAt, updatedAt, authorId, authorName) are read-only. Body content with embedded `---` lines is preserved — only the FIRST `---` block at byte 0 is treated as frontmatter.
+
+### `.wjscli/index.json` schema
+
+```ts
+type SyncIndex = {
+  version: 1;
+  entries: Array<{
+    id: number;             // Wiki.js page id (stable identifier)
+    path: string;           // Wiki.js path at last sync
+    file: string;           // relative path inside the clone (POSIX-style)
+    hash: string;           // SHA-256 of the file's full text at last sync
+    remoteUpdatedAt: string;// server's `updatedAt` at last sync
+    syncedAt: string;       // when we last touched this entry
+  }>;
+};
+```
+
+The index is the equivalent of `.git/index`: it records the state the working tree was in at last sync, so we can detect both local edits (`hash` differs from recomputed) and remote drift (`remoteUpdatedAt` differs from current server response). Sorted by `path` on write for stable diffs against version control.
+
+### Verbs
+
+- `sync clone` — `initRepo()` writes `.wjscli/`, then walks the page tree (`pages.tree` with iterative BFS so deep wikis don't blow the stack) and fans out `pages.single(id)` queries with concurrency = 8 to fetch bodies. One file per page; index built up entry by entry.
+- `sync status` — diffs the working tree against the index. Detects modified (hash mismatch), deleted (file missing), untracked (.md not in index). `--remote` also queries each tracked page's current `updatedAt` and flags drift; expensive on large wikis (one query per page).
+- `sync pull` — same tree walk + fetch as clone, but updates an existing clone. For each remote page: if not in index, add; if in index and locally unmodified, overwrite; if in index and locally modified, skip (unless `--force`). Detects renames by matching `id` across the new path. Pages that no longer exist on the server are listed but their local file + index entry are kept intact.
+- `sync push` — for each modified entry (local hash differs from index hash): fetch current remote `updatedAt`, refuse if it differs from `index.remoteUpdatedAt` (unless `--force`), issue the `pages.update` mutation with the full mutable-field set extracted from frontmatter + body, then re-fetch to record the new `updatedAt` and recompute the index hash. `--dry-run` lists what would be pushed without contacting the server for the update.
+
+### What `sync` deliberately does NOT do (yet)
+
+- Create new pages from untracked files (a future enhancement; users use `page create` for now).
+- Delete pages from the server (Wiki.js's delete API isn't exposed through the MCP tools or the CLI).
+- Multi-locale clones in a single working tree (clone is one locale per directory).
+- Three-way merge / textual conflict resolution (push refuses on conflict; user resolves by hand).
+
 #### Argv format
 
 `src/cli/argv.ts` is a minimal argv reader (no `commander`/`yargs` dependency):

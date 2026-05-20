@@ -2,11 +2,14 @@
 import { runCli } from './cli/index.js';
 import { canonicalizeBaseUrl } from './config.js';
 import { runServer } from './server.js';
+import { runSync } from './sync/index.js';
 import { runValidate } from './validate.js';
 import { getVersion } from './util/version.js';
 
 // Top-level subcommand names that come after <base-url>. Used to give the
 // caller a friendlier error if they put a subcommand before the URL.
+// `sync` is special: it's a top-level command in its own right (git-style),
+// not a URL-first subcommand, so it isn't in this list.
 const TOP_LEVEL_COMMANDS = ['validate', 'mcp'] as const;
 
 export async function main(argv: string[]): Promise<number> {
@@ -36,6 +39,13 @@ export async function main(argv: string[]): Promise<number> {
     process.stderr.write(`wjscli: unknown option: ${first}\n`);
     printUsageToStderr();
     return 2;
+  }
+
+  // `sync` is a top-level subcommand (git-style); the URL lives inside
+  // `.wjscli/config.json` after `sync clone` writes it, so post-clone
+  // invocations don't take a URL on the command line.
+  if (first === 'sync') {
+    return runSync(rest);
   }
 
   // Every other invocation is `<base-url> <command> [args...]`. Catch the
@@ -91,13 +101,18 @@ function usageText(): string {
     '  wjscli <base-url> validate <jwt> [-t]      Validate JWT, write config',
     '                                             -t: stay running, keep token refreshed',
     '  wjscli <base-url> mcp                      Start MCP stdio server',
-    '  wjscli <base-url> page get   --id N | --path P [--locale L]',
+    '  wjscli <base-url> page get <id-or-path> [--locale L]',
     '  wjscli <base-url> page create --path P --title T --content C [...]',
-    '  wjscli <base-url> page update --id N [fields...]',
-    '  wjscli <base-url> page history --id N [--offset-page N --offset-size N]',
-    '  wjscli <base-url> pages tree [--parent N --mode ALL|PAGES|FOLDERS --locale L]',
+    '  wjscli <base-url> page update <id-or-path> [fields...]',
+    '  wjscli <base-url> page history <id-or-path> [--offset-page N --offset-size N]',
+    '  wjscli <base-url> pages tree [--parent N --mode ALL|PAGES|FOLDERS --locale L --depth N]',
     '  wjscli <base-url> search <query> [--locale L]',
     '  wjscli <base-url> tags list',
+    '',
+    '  wjscli sync clone <base-url> <dir>         Clone wiki to a local dir',
+    '  wjscli sync status [-C <dir>] [--remote]   Show local + remote changes',
+    '  wjscli sync pull   [-C <dir>] [--force]    Re-fetch pages from the wiki',
+    '  wjscli sync push   [-C <dir>] [--force]    Upload locally-modified pages',
     '  wjscli --version                           Print version',
     '  wjscli --help                              Print this help',
     '',
