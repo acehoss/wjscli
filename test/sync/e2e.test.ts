@@ -163,9 +163,13 @@ function seedWiki(pages: Page[]): void {
         return {
           data: {
             pages: {
+              // Deliberately offset the pageTree row id from the page id
+              // (id = pageId + 1000). Wiki.js really does store these in
+              // separate tables, so any code that confuses them — e.g.
+              // passing the tree row id to `pages.single` — fails loudly.
               tree: pages.map((p) =>
                 makeTreeNode({
-                  id: p.id,
+                  id: p.id + 1000,
                   path: p.path,
                   depth: 1,
                   title: p.title,

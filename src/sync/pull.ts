@@ -67,10 +67,22 @@ export async function runPull(opts: RunPullOptions): Promise<number> {
     const newEntries: SyncIndexEntry[] = [];
 
     await runWithConcurrency(remotePages, CONCURRENT_PAGE_FETCH, async (node) => {
-      const data = await client.gql<PageSingleResponse>(PAGE_SINGLE_QUERY, {
-        id: node.id,
-      });
-      const page = data.pages.single;
+      // See clone.ts: `pages.single` keys by `pageId`, not by the
+      // pageTree row's own `id`. Pre-filter already drops null pageIds.
+      const pageId = node.pageId;
+      if (pageId === null) return;
+      let page;
+      try {
+        const data = await client.gql<PageSingleResponse>(PAGE_SINGLE_QUERY, {
+          id: pageId,
+        });
+        page = data.pages.single;
+      } catch (err) {
+        process.stderr.write(
+          `  ! ${node.path}: ${err instanceof Error ? err.message : String(err)}; skipping\n`,
+        );
+        return;
+      }
       if (page === null) {
         process.stderr.write(
           `  ! ${node.path}: pages.single returned null on pull; skipping\n`,

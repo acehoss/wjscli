@@ -95,44 +95,62 @@ export async function runClone(opts: CloneOptions): Promise<number> {
 
     // Step 2: fetch the body for every page (the tree query only carries
     // metadata). Bounded concurrency keeps us neighbourly without serial
-    // latency.
+    // latency. Per-page errors are logged but don't abort the whole clone —
+    // a single rotted page shouldn't lose the other 288.
     const entries: SyncIndexEntry[] = [];
     let done = 0;
+    let failed = 0;
     await runWithConcurrency(pages, CONCURRENT_PAGE_FETCH, async (node) => {
-      const data = await client.gql<PageSingleResponse>(PAGE_SINGLE_QUERY, {
-        id: node.id,
-      });
-      const page = data.pages.single;
-      if (page === null) {
+      // The tree row's `id` is a pageTree row id, NOT the page id — Wiki.js
+      // stores them in separate tables. `pages.single` indexes by page id,
+      // which the tree node exposes as `pageId`. We've already filtered
+      // out nodes with `pageId === null`, so the assertion below is safe.
+      const pageId = node.pageId;
+      if (pageId === null) return;
+      try {
+        const data = await client.gql<PageSingleResponse>(PAGE_SINGLE_QUERY, {
+          id: pageId,
+        });
+        const page = data.pages.single;
+        if (page === null) {
+          process.stderr.write(
+            `  ! skipping ${node.path}: pages.single returned null\n`,
+          );
+          failed += 1;
+          return;
+        }
+        const fileRel = pathToFile(page.path);
+        const fileAbs = path.join(absTarget, fileRel);
+        await fs.mkdir(path.dirname(fileAbs), { recursive: true });
+        const text = serializePage(page);
+        await fs.writeFile(fileAbs, text, 'utf8');
+        entries.push({
+          id: page.id,
+          path: page.path,
+          file: fileRel,
+          hash: contentHash(text),
+          remoteUpdatedAt: page.updatedAt,
+          syncedAt: new Date().toISOString(),
+        });
+        done += 1;
+        if (done % 10 === 0 || done === pages.length) {
+          process.stderr.write(
+            `  ${done.toString()}/${pages.length.toString()} fetched\n`,
+          );
+        }
+      } catch (err) {
+        failed += 1;
         process.stderr.write(
-          `  ! skipping ${node.path}: pages.single returned null\n`,
-        );
-        return;
-      }
-      const fileRel = pathToFile(page.path);
-      const fileAbs = path.join(absTarget, fileRel);
-      await fs.mkdir(path.dirname(fileAbs), { recursive: true });
-      const text = serializePage(page);
-      await fs.writeFile(fileAbs, text, 'utf8');
-      entries.push({
-        id: page.id,
-        path: page.path,
-        file: fileRel,
-        hash: contentHash(text),
-        remoteUpdatedAt: page.updatedAt,
-        syncedAt: new Date().toISOString(),
-      });
-      done += 1;
-      if (done % 10 === 0 || done === pages.length) {
-        process.stderr.write(
-          `  ${done.toString()}/${pages.length.toString()} fetched\n`,
+          `  ! skipping ${node.path}: ${err instanceof Error ? err.message : String(err)}\n`,
         );
       }
     });
 
     await writeIndex(repo, { version: 1, entries });
     process.stderr.write(
-      `✓ Cloned ${entries.length.toString()} pages to ${absTarget}\n`,
+      `✓ Cloned ${entries.length.toString()} pages to ${absTarget}` +
+        (failed > 0 ? ` (${failed.toString()} skipped — see warnings above)` : '') +
+        '\n',
     );
     return 0;
   } catch (err) {
